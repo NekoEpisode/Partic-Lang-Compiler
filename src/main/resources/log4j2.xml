@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" name="ParticCompiler">
+    <Appenders>
+        <!-- 控制台输出 -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+
+        <!-- 文件输出 - 详细日志 -->
+        <File name="FileAppender" fileName="logs/compiler.log">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
+        </File>
+
+        <!-- 错误日志单独文件 -->
+        <RollingFile name="ErrorFile" fileName="logs/errors.log"
+                     filePattern="logs/errors-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy />
+                <SizeBasedTriggeringPolicy size="10 MB"/>
+            </Policies>
+        </RollingFile>
+
+        <!-- 语法分析调试日志 -->
+        <RollingFile name="ParserDebug" fileName="logs/parser-debug.log"
+                     filePattern="logs/parser-debug-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level - %msg%n"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy />
+                <SizeBasedTriggeringPolicy size="5 MB"/>
+            </Policies>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <!-- 编译器主日志 -->
+        <Logger name="io.github.nekosora" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console" level="INFO"/> <!-- 修改控制台输出级别 -->
+            <AppenderRef ref="FileAppender" level="DEBUG"/>
+            <AppenderRef ref="ErrorFile" level="ERROR"/>
+        </Logger>
+
+        <!-- ANTLR解析器日志 -->
+        <Logger name="org.antlr.v4" level="WARN" additivity="false">
+            <AppenderRef ref="ParserDebug" level="DEBUG"/>
+        </Logger>
+
+        <!-- 根日志 -->
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="ErrorFile" level="ERROR"/>
+        </Root>
+    </Loggers>
+</Configuration>
