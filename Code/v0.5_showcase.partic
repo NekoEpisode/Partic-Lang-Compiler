@@ -1,0 +1,50 @@
+// Partic 语言 v0.5 版本实际已实现功能展示
+
+// --- 1. 导入 Java 类 ---
+// 这是与 Java 交互的基础
+import java.lang.System;
+import java.lang.String;
+
+import io.github.nekosora.Test;
+
+// --- 2. 自定义函数定义与调用 ---
+// 展示了语言内部的函数调用能力
+def void printSectionHeader(str title) {
+    System.out.print("--- "); System.out.print(title); System.out.println(" ---"); // 字符串拼接暂不支持，所以我们使用print手动拼接
+}
+
+// --- 程序主入口 ---
+def void main(str[] args) {
+    printSectionHeader("Feature: Variable Declaration & Static Java Method Calls");
+
+    // 声明并初始化不同类型的局部变量
+    str languageName = "Partic";
+    int majorVersion = 0;
+    int minorVersion = 5;
+
+    // 调用静态 Java 方法 (System.out.println)
+    // 展示了变量使用
+    System.out.print("Welcome to "); System.out.print(languageName); System.out.print(" v"); System.out.print(majorVersion); System.out.print("."); System.out.println(minorVersion);
+
+    // 调用本文件中定义的另一个函数
+    printSectionHeader("Feature: Java Object Instantiation & Instance Method Calls");
+
+    // 使用 'new' 关键字创建 Java 对象实例
+    Test myList = new Test();
+    System.out.println("Successfully created a new Test List object.");
+
+    // 调用实例方法 .add() 来修改对象状态(尚不支持泛型)
+    myList.add("12");
+    myList.add(100);
+    myList.add(String.valueOf(true));
+    System.out.println("Successfully added 3 elements to the ArrayList.");
+
+    // 调用实例方法 .get() 来检索对象数据
+    // 由于尚未实现循环，我们手动一个一个地获取并打印
+    System.out.println("Retrieving elements manually (as loops are not yet implemented):");
+    System.out.println("Element at Index 0: " + myList.get(0));
+    System.out.println("Element at Index 1: " + myList.get(1));
+    System.out.println("Element at Index 2: " + myList.get(2));
+
+    printSectionHeader("Showcase Finished");
+}
