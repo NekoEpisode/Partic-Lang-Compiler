@@ -4,6 +4,7 @@
 // 这是与 Java 交互的基础
 import java.lang.System;
 import java.lang.String;
+import java.lang.StringBuilder;
 
 import io.github.nekosora.Test;
 
@@ -42,9 +43,9 @@ def void main(str[] args) {
     // 调用实例方法 .get() 来检索对象数据
     // 由于尚未实现循环，我们手动一个一个地获取并打印
     System.out.println("Retrieving elements manually (as loops are not yet implemented):");
-    System.out.println("Element at Index 0: " + myList.get(0));
-    System.out.println("Element at Index 1: " + myList.get(1));
-    System.out.println("Element at Index 2: " + myList.get(2));
+    System.out.println(new StringBuilder().append("Element at Index 0: ").append(myList.get(0)).toString()); // 顺带一提，虽然尚未支持字符串拼接，但是我们可以用StringBuilder变相实现这一点
+    System.out.println(new StringBuilder().append("Element at Index 1: ").append(myList.get(1)).toString());
+    System.out.println(new StringBuilder().append("Element at Index 2: ").append(myList.get(2)).toString());
 
     printSectionHeader("Showcase Finished");
 }
