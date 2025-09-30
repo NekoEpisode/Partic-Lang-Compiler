@@ -9,6 +9,7 @@ import java.util.Set;
 
 public class TypeUtils {
     private static final Map<String, String> PRIMITIVE_DESCRIPTORS = new HashMap<>();
+    private static final Map<String, String> REVERSE_PRIMITIVE_DESCRIPTORS = new HashMap<>();
 
     static {
         PRIMITIVE_DESCRIPTORS.put("int", "I");
@@ -21,6 +22,10 @@ public class TypeUtils {
         PRIMITIVE_DESCRIPTORS.put("short", "S");
         PRIMITIVE_DESCRIPTORS.put("void", "V");
         PRIMITIVE_DESCRIPTORS.put("str", "Ljava/lang/String;");
+
+        for (Map.Entry<String, String> entry : PRIMITIVE_DESCRIPTORS.entrySet()) {
+            REVERSE_PRIMITIVE_DESCRIPTORS.put(entry.getValue(), entry.getKey());
+        }
     }
 
     /**
@@ -80,5 +85,42 @@ public class TypeUtils {
     private static boolean isJavaLangClass(String name) {
         return Set.of("String", "Object", "Integer", "Double", "Boolean",
                 "Float", "Long", "Short", "Byte", "Character", "System", "Math").contains(name);
+    }
+
+    public static String getReturnType(String descriptor) {
+        if (descriptor == null || !descriptor.startsWith("(")) {
+            return "void";
+        }
+
+        int paramEnd = descriptor.indexOf(')');
+        if (paramEnd == -1) {
+            return "void";
+        }
+
+        String returnTypeDescriptor = descriptor.substring(paramEnd + 1);
+
+        return descriptorToTypeName(returnTypeDescriptor);
+    }
+
+    private static String descriptorToTypeName(String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) {
+            return "void";
+        }
+
+        if (REVERSE_PRIMITIVE_DESCRIPTORS.containsKey(descriptor)) {
+            return REVERSE_PRIMITIVE_DESCRIPTORS.get(descriptor);
+        }
+
+        if (descriptor.startsWith("[")) {
+            String componentType = descriptorToTypeName(descriptor.substring(1));
+            return componentType + "[]";
+        }
+
+        if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
+            String internalName = descriptor.substring(1, descriptor.length() - 1);
+            return internalName.replace('/', '.');
+        }
+
+        return descriptor;
     }
 }

@@ -84,7 +84,7 @@ public class Main {
 
     private static void executeCompiledClass(String classDir, String className) {
         try (URLClassLoader classLoader = new URLClassLoader(
-                new URL[]{new URI("file:///" + Paths.get(classDir).toAbsolutePath()).toURL()},
+                new URL[]{new URI("file:///" + Paths.get(classDir.replace(" ", "%20")).toAbsolutePath()).toURL()},
                 Main.class.getClassLoader()
         )) {
             Class<?> compiledClass = classLoader.loadClass(className);

@@ -19,6 +19,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.objectweb.asm.Opcodes.*;
 
@@ -28,6 +29,13 @@ public class ParticCompiler {
     private final ClassWriter classWriter;
     private MethodVisitor methodVisitor;
     private final String className;
+
+    private static final Map<Type, Integer> TYPE_RANK = Map.of(
+            Type.INT_TYPE, 1,
+            Type.LONG_TYPE, 2,
+            Type.FLOAT_TYPE, 3,
+            Type.DOUBLE_TYPE, 4
+    );
 
     public ParticCompiler(CompileContext context, Path outputPath) {
         this.context = context;
@@ -47,6 +55,7 @@ public class ParticCompiler {
 
     private void writeClassFile() {
         try {
+
             byte[] bytecode = classWriter.toByteArray();
             if (outputPath.getParent() != null) {
                 java.nio.file.Files.createDirectories(outputPath.getParent());
@@ -66,24 +75,65 @@ public class ParticCompiler {
 
     private void generateFunctions() {
         for (ParticFunction function : context.getFunctionManager().getFunctions()) {
+            context.setCurrentFunction(function);
             context.setLocalVariables(function.getLocalVariables());
 
             methodVisitor = classWriter.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName(), function.getDescriptor(), null, null);
             methodVisitor.visitCode();
+
             for (JsonObject action : function.getActions()) {
                 generateAction(action);
             }
-            methodVisitor.visitInsn(RETURN);
+
+            // 大部分return类型已经被函数本身处理过，这里我们只允许隐式void return
+            Type returnType = Type.getReturnType(function.getDescriptor());
+            if (returnType.equals(Type.VOID_TYPE)) {
+                boolean hasReturn = function.getActions().stream()
+                        .anyMatch(action -> "RETURN_STATEMENT".equals(action.get("type").getAsString()));
+                if (!hasReturn) {
+                    methodVisitor.visitInsn(RETURN);
+                }
+            }
+
             methodVisitor.visitMaxs(0, 0);
             methodVisitor.visitEnd();
         }
     }
 
     private void generateAction(JsonObject action) {
+        System.out.println(action);
         String type = action.get("type").getAsString();
         switch (type) {
             case "VARIABLE_DECLARATION" -> generateVariableDeclaration(action);
             case "EXPRESSION_STATEMENT" -> generateExpression(action.get("expression").getAsJsonObject());
+            case "RETURN_STATEMENT" -> generateReturnStatement(action);
+        }
+    }
+
+    private void generateReturnStatement(JsonObject action) {
+        if (action.has("expression")) {
+            Type expressionType = generateExpression(action.get("expression").getAsJsonObject());
+
+            Type methodReturnType = Type.getReturnType(context.getCurrentFunction().getDescriptor());
+
+            if (methodReturnType.equals(Type.VOID_TYPE)) {
+                throw new CompileError("Cannot return a value from a void method: " + context.getCurrentFunction().getName());
+            }
+
+            if (!expressionType.equals(methodReturnType)) {
+                convertToReturnType(expressionType, methodReturnType);
+            }
+
+            int returnOpcode = methodReturnType.getOpcode(IRETURN);
+            methodVisitor.visitInsn(returnOpcode);
+        } else {
+            Type methodReturnType = Type.getReturnType(context.getCurrentFunction().getDescriptor());
+
+            if (!methodReturnType.equals(Type.VOID_TYPE)) {
+                throw new CompileError("Missing return value in method: " + context.getCurrentFunction().getName());
+            }
+
+            methodVisitor.visitInsn(RETURN);
         }
     }
 
@@ -125,6 +175,8 @@ public class ParticCompiler {
             case "METHOD_CALL": return generateMethodCall(expr);
             case "FIELD_ACCESS": return generateFieldAccess(expr);
             case "VARIABLE_LOAD": return generateVariableLoad(expr);
+            case "BINARY_OPERATION":
+                return generateBinaryOperation(expr);
             case "STATIC_ACCESS":
                 String fqcn = context.getImportManager().foundFullName(expr.get("className").getAsString());
                 try {
@@ -164,24 +216,134 @@ public class ParticCompiler {
         throw new CompileError("Unknown expression type: " + type);
     }
 
+    private Type analyzeExpressionType(JsonObject expr) {
+        String type = expr.get("type").getAsString();
+        switch (type) {
+            case "intLiteral":
+                return Type.INT_TYPE;
+            case "floatLiteral":
+                return Type.FLOAT_TYPE;
+            case "VARIABLE_LOAD": {
+                String varName = expr.get("varName").getAsString();
+                VariableInfo varInfo = context.getLocalVariable(varName);
+                if (varInfo == null) {
+                    throw new CompileError("Undefined variable: " + varName);
+                }
+                return Type.getType(varInfo.descriptor());
+            }
+            case "BINARY_OPERATION": {
+                JsonObject left = expr.getAsJsonObject("left");
+                JsonObject right = expr.getAsJsonObject("right");
+                Type leftType = analyzeExpressionType(left);
+                Type rightType = analyzeExpressionType(right);
+                return getTargetType(leftType, rightType);
+            }
+            default:
+                throw new CompileError("Unsupported type analysis for: " + type);
+        }
+    }
+
+    private Type generateBinaryOperation(JsonObject expr) {
+        String operator = expr.get("operator").getAsString();
+        JsonObject leftExpr = expr.getAsJsonObject("left");
+        JsonObject rightExpr = expr.getAsJsonObject("right");
+
+        // 先分析目标类型
+        Type targetType = analyzeExpressionType(expr);
+
+        // 生成左边并提升到目标类型
+        Type leftType = generateExpression(leftExpr);
+        if (!leftType.equals(targetType)) {
+            promote(leftType, targetType);
+        }
+
+        // 生成右边并提升到目标类型
+        Type rightType = generateExpression(rightExpr);
+        if (!rightType.equals(targetType)) {
+            promote(rightType, targetType);
+        }
+
+        // 发射字节码
+        switch (operator) {
+            case "+":
+                methodVisitor.visitInsn(targetType.getOpcode(IADD));
+                break;
+            case "-":
+                methodVisitor.visitInsn(targetType.getOpcode(ISUB));
+                break;
+            case "*":
+                methodVisitor.visitInsn(targetType.getOpcode(IMUL));
+                break;
+            case "/":
+                methodVisitor.visitInsn(targetType.getOpcode(IDIV));
+                break;
+            case "%":
+                methodVisitor.visitInsn(targetType.getOpcode(IREM));
+                break;
+            default:
+                throw new CompileError("Unsupported operator: " + operator);
+        }
+
+        return targetType;
+    }
+
     private java.lang.reflect.Constructor<?> findConstructor(Class<?> clazz, List<Type> argTypes) throws NoSuchMethodException {
+        Class<?>[] paramClasses = new Class<?>[argTypes.size()];
+        for (int i = 0; i < argTypes.size(); i++) {
+            paramClasses[i] = getClassFromType(argTypes.get(i));
+        }
+
+        // 首先尝试精确匹配
         for (java.lang.reflect.Constructor<?> constructor : clazz.getConstructors()) {
-            Class<?>[] paramTypes = constructor.getParameterTypes();
-            if (paramTypes.length != argTypes.size()) {
+            Class<?>[] constructorParams = constructor.getParameterTypes();
+            if (constructorParams.length != paramClasses.length) {
                 continue;
             }
-            boolean match = true;
-            for (int i = 0; i < paramTypes.length; i++) {
-                if (!Type.getType(paramTypes[i]).equals(argTypes.get(i))) {
-                    match = false;
+            boolean exactMatch = true;
+            for (int i = 0; i < constructorParams.length; i++) {
+                if (!constructorParams[i].equals(paramClasses[i])) {
+                    exactMatch = false;
                     break;
                 }
             }
-            if (match) {
+            if (exactMatch) {
                 return constructor;
             }
         }
-        throw new NoSuchMethodException("No matching constructor found for class " + clazz.getName() + " with args " + argTypes);
+
+        // 精确匹配失败，查找兼容的构造函数
+        java.lang.reflect.Constructor<?> bestMatch = null;
+        int bestMatchScore = Integer.MAX_VALUE;
+
+        for (java.lang.reflect.Constructor<?> constructor : clazz.getConstructors()) {
+            Class<?>[] constructorParams = constructor.getParameterTypes();
+            if (constructorParams.length != paramClasses.length) {
+                continue;
+            }
+
+            boolean compatible = true;
+            int matchScore = 0;
+
+            for (int i = 0; i < constructorParams.length; i++) {
+                if (!isAssignable(paramClasses[i], constructorParams[i])) {
+                    compatible = false;
+                    break;
+                }
+                matchScore += getAssignmentDistance(paramClasses[i], constructorParams[i]);
+            }
+
+            if (compatible && matchScore < bestMatchScore) {
+                bestMatch = constructor;
+                bestMatchScore = matchScore;
+            }
+        }
+
+        if (bestMatch != null) {
+            return bestMatch;
+        }
+
+        throw new NoSuchMethodException("No compatible constructor found for class " + clazz.getName() +
+                " with args " + java.util.Arrays.toString(paramClasses));
     }
 
     private Type generateObjectCreation(JsonObject expr) {
@@ -236,7 +398,7 @@ public class ParticCompiler {
             Class<?> targetClass = Class.forName(targetTypeName);
             Method methodToCall = findMethod(targetClass, methodName, argTypes);
             String methodDescriptor = Type.getMethodDescriptor(methodToCall);
-            String owner = Type.getInternalName(methodToCall.getDeclaringClass());
+            String owner = targetType.getInternalName();
 
             boolean isStatic = java.lang.reflect.Modifier.isStatic(methodToCall.getModifiers());
             int opcode;
@@ -292,29 +454,262 @@ public class ParticCompiler {
     }
 
     private Method findMethod(Class<?> clazz, String name, List<Type> argTypes) throws NoSuchMethodException {
+        Class<?>[] paramClasses = new Class<?>[argTypes.size()];
+        for (int i = 0; i < argTypes.size(); i++) {
+            paramClasses[i] = getClassFromType(argTypes.get(i));
+        }
+
+        // 首先尝试精确匹配
+        try {
+            return clazz.getMethod(name, paramClasses);
+        } catch (NoSuchMethodException e) {
+            // 精确匹配失败，尝试查找兼容的方法
+        }
+
+        // 查找所有公共方法，包括继承的方法
+        Method bestMatch = null;
+        int bestMatchScore = Integer.MAX_VALUE;
+
         for (Method method : clazz.getMethods()) {
             if (!method.getName().equals(name)) {
                 continue;
             }
-            Class<?>[] paramTypes = method.getParameterTypes();
-            if (paramTypes.length != argTypes.size()) {
+
+            Class<?>[] methodParams = method.getParameterTypes();
+            if (methodParams.length != paramClasses.length) {
                 continue;
             }
-            boolean match = true;
-            for (int i = 0; i < paramTypes.length; i++) {
-                if (!Type.getType(paramTypes[i]).equals(argTypes.get(i))) {
-                    match = false;
+
+            // 检查参数是否兼容
+            boolean compatible = true;
+            int matchScore = 0;
+
+            for (int i = 0; i < methodParams.length; i++) {
+                if (!isAssignable(paramClasses[i], methodParams[i])) {
+                    compatible = false;
                     break;
                 }
+                // 计算匹配分数：精确匹配得0分，需要转换的得更高分
+                matchScore += getAssignmentDistance(paramClasses[i], methodParams[i]);
             }
-            if (match) {
-                return method;
+
+            if (compatible && matchScore < bestMatchScore) {
+                bestMatch = method;
+                bestMatchScore = matchScore;
             }
         }
-        throw new NoSuchMethodException();
+
+        if (bestMatch != null) {
+            return bestMatch;
+        }
+
+        throw new NoSuchMethodException("No compatible method found for " + clazz.getName() + "." + name +
+                " with args " + java.util.Arrays.toString(paramClasses));
+    }
+
+    /**
+     * 检查 from 类型是否可以赋值给 to 类型
+     */
+    private boolean isAssignable(Class<?> from, Class<?> to) {
+        // 完全相同
+        if (from.equals(to)) {
+            return true;
+        }
+
+        // 处理基本类型的自动装箱/拆箱
+        if (from.isPrimitive() || to.isPrimitive()) {
+            return isPrimitiveAssignable(from, to);
+        }
+
+        // 处理继承关系
+        return to.isAssignableFrom(from);
+    }
+
+    /**
+     * 处理基本类型之间的兼容性
+     */
+    private boolean isPrimitiveAssignable(Class<?> from, Class<?> to) {
+        // 自动装箱/拆箱
+        Class<?> fromWrapper = getWrapperClass(from);
+        Class<?> toWrapper = getWrapperClass(to);
+
+        if (fromWrapper.equals(toWrapper)) {
+            return true;
+        }
+
+        // 基本类型的自动提升（如 int -> long）
+        if (from.isPrimitive() && to.isPrimitive()) {
+            if (from == byte.class) return to == short.class || to == int.class || to == long.class || to == float.class || to == double.class;
+            if (from == short.class) return to == int.class || to == long.class || to == float.class || to == double.class;
+            if (from == char.class) return to == int.class || to == long.class || to == float.class || to == double.class;
+            if (from == int.class) return to == long.class || to == float.class || to == double.class;
+            if (from == long.class) return to == float.class || to == double.class;
+            if (from == float.class) return to == double.class;
+        }
+
+        return false;
+    }
+
+    /**
+     * 获取基本类型对应的包装类
+     */
+    private Class<?> getWrapperClass(Class<?> primitiveClass) {
+        if (!primitiveClass.isPrimitive()) {
+            return primitiveClass;
+        }
+        if (primitiveClass == int.class) return Integer.class;
+        if (primitiveClass == long.class) return Long.class;
+        if (primitiveClass == double.class) return Double.class;
+        if (primitiveClass == float.class) return Float.class;
+        if (primitiveClass == boolean.class) return Boolean.class;
+        if (primitiveClass == char.class) return Character.class;
+        if (primitiveClass == byte.class) return Byte.class;
+        if (primitiveClass == short.class) return Short.class;
+        if (primitiveClass == void.class) return Void.class;
+        return primitiveClass;
+    }
+
+    /**
+     * 计算赋值距离，用于选择最佳匹配
+     * 返回值越小表示匹配度越高
+     */
+    private int getAssignmentDistance(Class<?> from, Class<?> to) {
+        if (from.equals(to)) {
+            return 0; // 精确匹配
+        }
+
+        // 装箱/拆箱
+        if (getWrapperClass(from).equals(getWrapperClass(to))) {
+            return 1;
+        }
+
+        // 基本类型提升
+        if (from.isPrimitive() && to.isPrimitive()) {
+            return 2;
+        }
+
+        // 继承关系：计算继承层级
+        if (to.isAssignableFrom(from)) {
+            int distance = 3;
+            Class<?> current = from;
+            while (current != null && !current.equals(to)) {
+                distance++;
+                current = current.getSuperclass();
+                if (current == null) {
+                    // 检查接口
+                    for (Class<?> iface : from.getInterfaces()) {
+                        if (to.isAssignableFrom(iface)) {
+                            return distance;
+                        }
+                    }
+                }
+            }
+            return distance;
+        }
+
+        return Integer.MAX_VALUE; // 不兼容
     }
 
     private void generateClassFooter() {
         classWriter.visitEnd();
+    }
+
+    private Class<?> getClassFromType(Type type) {
+        try {
+            String className = type.getClassName();
+
+            switch (className) {
+                case "int": return int.class;
+                case "long": return long.class;
+                case "double": return double.class;
+                case "float": return float.class;
+                case "boolean": return boolean.class;
+                case "char": return char.class;
+                case "byte": return byte.class;
+                case "short": return short.class;
+                case "void": return void.class;
+            }
+
+            if (className.endsWith("[]")) {
+                return Class.forName(type.getDescriptor().replace('/', '.'));
+            }
+
+            return Class.forName(className);
+
+        } catch (ClassNotFoundException e) {
+            throw new CompileError("Internal error during reflection: " + e.getMessage() + " (type: " + type + ")");
+        }
+    }
+
+    private Type promote(Type from, Type to) {
+        if (from.equals(to)) return from;
+
+        if (from.equals(Type.INT_TYPE)) {
+            if (to.equals(Type.LONG_TYPE)) {
+                methodVisitor.visitInsn(I2L);
+                return Type.LONG_TYPE;
+            } else if (to.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(I2F);
+                return Type.FLOAT_TYPE;
+            } else if (to.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(I2D);
+                return Type.DOUBLE_TYPE;
+            }
+        } else if (from.equals(Type.LONG_TYPE)) {
+            if (to.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(L2F);
+                return Type.FLOAT_TYPE;
+            } else if (to.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(L2D);
+                return Type.DOUBLE_TYPE;
+            }
+        } else if (from.equals(Type.FLOAT_TYPE) && to.equals(Type.DOUBLE_TYPE)) {
+            methodVisitor.visitInsn(F2D);
+            return Type.DOUBLE_TYPE;
+        }
+
+        throw new CompileError("Cannot promote " + from + " to " + to);
+    }
+
+    private Type getTargetType(Type left, Type right) {
+        int leftRank = TYPE_RANK.getOrDefault(left, 0);
+        int rightRank = TYPE_RANK.getOrDefault(right, 0);
+        if (leftRank == 0 || rightRank == 0) {
+            throw new CompileError("Unsupported type for arithmetic: " + left + ", " + right);
+        }
+        return leftRank >= rightRank ? left : right;
+    }
+
+    private void convertToReturnType(Type fromType, Type toType) {
+        if (fromType.equals(toType)) {
+            return;
+        }
+
+        // 基本类型转换
+        if (fromType.equals(Type.INT_TYPE)) {
+            if (toType.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(I2D);
+            } else if (toType.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(I2F);
+            } else if (toType.equals(Type.LONG_TYPE)) {
+                methodVisitor.visitInsn(I2L);
+            }
+        } else if (fromType.equals(Type.FLOAT_TYPE)) {
+            if (toType.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(F2D);
+            } else {
+                throw new CompileError("Cannot convert from " + fromType + " to " + toType + " in return statement");
+            }
+        } else if (fromType.equals(Type.LONG_TYPE)) {
+            if (toType.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(L2D);
+            } else if (toType.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(L2F);
+            } else {
+                throw new CompileError("Cannot convert from " + fromType + " to " + toType + " in return statement");
+            }
+        } else {
+            throw new CompileError("Cannot convert from " + fromType + " to " + toType + " in return statement");
+        }
     }
 }

@@ -30,11 +30,68 @@ public class ParticCompilerVisitor extends ParticBaseVisitor<JsonObject> {
         context.setStartTime(System.currentTimeMillis());
         ParticLogger.mainInfo("开始编译流程，保存class到 \"" + saveFilePath.toString() + "\" ...");
         ParticLogger.semanticInfo("开始语义分析收集信息...");
+
         ctx.importStatement().forEach(this::visit);
-        ctx.functionDeclaration().forEach(this::visit);
+
+        ParticLogger.semanticInfo("第一遍扫描：收集函数签名...");
+        for (ParticParser.FunctionDeclarationContext funcCtx : ctx.functionDeclaration()) {
+            collectFunctionSignature(funcCtx);
+        }
+
+        ParticLogger.semanticInfo("第二遍扫描：处理函数体...");
+        for (ParticParser.FunctionDeclarationContext funcCtx : ctx.functionDeclaration()) {
+            processFunctionBody(funcCtx);
+        }
+
         ParticLogger.semanticInfo("语义信息收集完成");
         new ParticCompiler(context, saveFilePath).compile();
         return null;
+    }
+
+    private void collectFunctionSignature(ParticParser.FunctionDeclarationContext ctx) {
+        List<ParticParser.ParameterContext> parameterContexts =
+                ctx.parameterList() == null ? new ArrayList<>() : ctx.parameterList().parameter();
+
+        StringBuilder descriptor = new StringBuilder("(");
+
+        for (ParticParser.ParameterContext parameterContext : parameterContexts) {
+            String fullParamTypeName = resolveFullClassName(parameterContext.type());
+            String paramDescriptor = TypeUtils.toDescriptor(fullParamTypeName);
+            descriptor.append(paramDescriptor);
+        }
+
+        descriptor.append(")");
+        String fullReturnTypeName = resolveFullClassName(ctx.type());
+        descriptor.append(TypeUtils.toDescriptor(fullReturnTypeName));
+
+        ParticFunction function = new ParticFunction(
+                ctx.IDENTIFIER().getText(),
+                descriptor.toString()
+        );
+        context.getFunctionManager().addFunction(function);
+    }
+
+    private void processFunctionBody(ParticParser.FunctionDeclarationContext ctx) {
+        context.resetLocalVariables();
+
+        ParticFunction function = context.getFunctionManager().getFunction(ctx.IDENTIFIER().getText());
+        context.setCurrentFunction(function);
+
+        List<ParticParser.ParameterContext> parameterContexts =
+                ctx.parameterList() == null ? new ArrayList<>() : ctx.parameterList().parameter();
+
+        for (ParticParser.ParameterContext parameterContext : parameterContexts) {
+            String fullParamTypeName = resolveFullClassName(parameterContext.type());
+            String paramName = parameterContext.IDENTIFIER().getText();
+            String paramDescriptor = TypeUtils.toDescriptor(fullParamTypeName);
+            context.allocateLocalVariable(paramName, paramDescriptor);
+        }
+
+        for (ParticParser.StatementContext stmt : ctx.block().statement()) {
+            function.getActions().add(visit(stmt));
+        }
+
+        function.setLocalVariables(context.getLocalVariablesMap());
     }
 
     @Override
@@ -48,41 +105,6 @@ public class ParticCompilerVisitor extends ParticBaseVisitor<JsonObject> {
         } else {
             importManager.addImport(qualifiedName, simpleName);
         }
-        return null;
-    }
-
-    @Override
-    public JsonObject visitFunctionDeclaration(ParticParser.FunctionDeclarationContext ctx) {
-        context.resetLocalVariables();
-
-        List<ParticParser.ParameterContext> parameterContexts = ctx.parameterList() == null ? new ArrayList<>() : ctx.parameterList().parameter();
-        StringBuilder descriptor = new StringBuilder("(");
-
-        for (ParticParser.ParameterContext parameterContext : parameterContexts) {
-            String fullParamTypeName = resolveFullClassName(parameterContext.type());
-            String paramName = parameterContext.IDENTIFIER().getText();
-            String paramDescriptor = TypeUtils.toDescriptor(fullParamTypeName);
-            descriptor.append(paramDescriptor);
-            context.allocateLocalVariable(paramName, paramDescriptor);
-        }
-
-        descriptor.append(")");
-        String fullReturnTypeName = resolveFullClassName(ctx.type());
-        if (!fullReturnTypeName.equals("void")) {
-            throw new CompileError("函数 " + ctx.IDENTIFIER().getText() + " 返回了非void，但当前版本并不支持");
-        }
-        descriptor.append(TypeUtils.toDescriptor(fullReturnTypeName));
-
-        ParticFunction function = new ParticFunction(ctx.IDENTIFIER().getText(), descriptor.toString(), parameterContexts);
-        context.getFunctionManager().addFunction(function);
-        context.setCurrentFunction(function);
-
-        for(ParticParser.StatementContext stmt : ctx.block().statement()) {
-            function.getActions().add(visit(stmt));
-        }
-
-        function.setLocalVariables(context.getLocalVariablesMap());
-
         return null;
     }
 
@@ -225,6 +247,54 @@ public class ParticCompilerVisitor extends ParticBaseVisitor<JsonObject> {
             literal.addProperty("type", "nullLiteral");
         }
         return literal;
+    }
+
+    @Override
+    public JsonObject visitReturnStatement(ParticParser.ReturnStatementContext ctx) {
+        JsonObject action = new JsonObject();
+        action.addProperty("type", "RETURN_STATEMENT");
+        if (ctx.expression() != null) {
+            action.add("expression", visit(ctx.expression()));
+        }
+        return action;
+    }
+
+    @Override
+    public JsonObject visitAdditiveExpression(ParticParser.AdditiveExpressionContext ctx) {
+        JsonObject result = visit(ctx.multiplicativeExpression(0));
+
+        for (int i = 1; i < ctx.multiplicativeExpression().size(); i++) {
+            String operator = ctx.getChild(i * 2 - 1).getText(); // 获取 + 或 -
+            JsonObject right = visit(ctx.multiplicativeExpression(i));
+
+            JsonObject binaryOp = new JsonObject();
+            binaryOp.addProperty("type", "BINARY_OPERATION");
+            binaryOp.addProperty("operator", operator);
+            binaryOp.add("left", result);
+            binaryOp.add("right", right);
+            result = binaryOp;
+        }
+
+        return result;
+    }
+
+    @Override
+    public JsonObject visitMultiplicativeExpression(ParticParser.MultiplicativeExpressionContext ctx) {
+        JsonObject result = visit(ctx.unaryExpression(0));
+
+        for (int i = 1; i < ctx.unaryExpression().size(); i++) {
+            String operator = ctx.getChild(i * 2 - 1).getText();
+            JsonObject right = visit(ctx.unaryExpression(i));
+
+            JsonObject binaryOp = new JsonObject();
+            binaryOp.addProperty("type", "BINARY_OPERATION");
+            binaryOp.addProperty("operator", operator);
+            binaryOp.add("left", result);
+            binaryOp.add("right", right);
+            result = binaryOp;
+        }
+
+        return result;
     }
 
     @Override
