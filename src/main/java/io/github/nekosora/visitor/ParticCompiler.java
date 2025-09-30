@@ -173,7 +173,34 @@ public class ParticCompiler {
         switch (type) {
             case "OBJECT_CREATION": return generateObjectCreation(expr);
             case "METHOD_CALL": return generateMethodCall(expr);
-            case "FIELD_ACCESS": return generateFieldAccess(expr);
+            case "FIELD_ACCESS": {
+                JsonObject targetExpr = expr.getAsJsonObject("target");
+                String fieldName = expr.get("fieldName").getAsString();
+
+                Type targetType = generateExpression(targetExpr);
+
+                if (targetType.getSort() == Type.ARRAY && fieldName.equals("length")) {
+                    methodVisitor.visitInsn(ARRAYLENGTH);
+                    return Type.INT_TYPE;
+                }
+
+                try {
+                    Class<?> targetClass = Class.forName(targetType.getClassName());
+                    Field field = targetClass.getField(fieldName);
+                    String owner = Type.getInternalName(field.getDeclaringClass());
+                    String descriptor = Type.getDescriptor(field.getType());
+
+                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                        methodVisitor.visitFieldInsn(GETSTATIC, owner, fieldName, descriptor);
+                    } else {
+                        methodVisitor.visitFieldInsn(GETFIELD, owner, fieldName, descriptor);
+                    }
+
+                    return Type.getType(field.getType());
+                } catch (ClassNotFoundException | NoSuchFieldException e) {
+                    throw new CompileError("Could not find field " + fieldName + " on class " + targetType.getClassName());
+                }
+            }
             case "VARIABLE_LOAD": return generateVariableLoad(expr);
             case "BINARY_OPERATION":
                 return generateBinaryOperation(expr);
@@ -221,8 +248,12 @@ public class ParticCompiler {
         switch (type) {
             case "intLiteral":
                 return Type.INT_TYPE;
+            case "longLiteral":
+                return Type.LONG_TYPE;
             case "floatLiteral":
                 return Type.FLOAT_TYPE;
+            case "doubleLiteral":
+                return Type.DOUBLE_TYPE;
             case "VARIABLE_LOAD": {
                 String varName = expr.get("varName").getAsString();
                 VariableInfo varInfo = context.getLocalVariable(varName);
@@ -237,6 +268,54 @@ public class ParticCompiler {
                 Type leftType = analyzeExpressionType(left);
                 Type rightType = analyzeExpressionType(right);
                 return getTargetType(leftType, rightType);
+            }
+            case "STATIC_ACCESS": {
+                String fqcn = context.getImportManager().foundFullName(expr.get("className").getAsString());
+                try {
+                    return Type.getType(Class.forName(fqcn));
+                } catch (ClassNotFoundException e) {
+                    throw new CompileError("Class not found: " + fqcn);
+                }
+            }
+            case "FIELD_ACCESS": {
+                JsonObject targetExpr = expr.getAsJsonObject("target");
+                String fieldName = expr.get("fieldName").getAsString();
+                Type targetType = analyzeExpressionType(targetExpr);
+                try {
+                    Class<?> targetClass = Class.forName(targetType.getClassName());
+                    Field field = targetClass.getField(fieldName);
+                    return Type.getType(field.getType());
+                } catch (ClassNotFoundException | NoSuchFieldException e) {
+                    throw new CompileError("Cannot analyze field type: " + fieldName);
+                }
+            }
+            case "METHOD_CALL": {
+                JsonObject targetExpr = expr.getAsJsonObject("target");
+                String methodName = expr.get("methodName").getAsString();
+                JsonArray args = expr.getAsJsonArray("args");
+
+                if (targetExpr.get("type").getAsString().equals("FUNCTION_REF")) {
+                    ParticFunction function = context.getFunctionManager()
+                            .getFunction(targetExpr.get("name").getAsString());
+                    return Type.getReturnType(function.getDescriptor());
+                }
+
+                try {
+                    Type targetType = analyzeExpressionType(targetExpr);
+                    Class<?> targetClass = Class.forName(targetType.getClassName());
+
+                    List<Type> argTypes = new ArrayList<>();
+                    for (JsonElement arg : args) {
+                        argTypes.add(analyzeExpressionType(arg.getAsJsonObject()));
+                    }
+
+                    Method method = findMethod(targetClass, methodName, argTypes);
+                    return Type.getType(method.getReturnType());
+                } catch (ClassNotFoundException e) {
+                    throw new CompileError("Cannot analyze return type of method: " + methodName + " - " + e.getMessage());
+                } catch (NoSuchMethodException e) {
+                    throw new CompileError("Cannot find method: " + methodName + " - " + e.getMessage());
+                }
             }
             default:
                 throw new CompileError("Unsupported type analysis for: " + type);
@@ -422,12 +501,29 @@ public class ParticCompiler {
         String fieldName = expr.get("fieldName").getAsString();
 
         Type targetType = generateExpression(targetExpr);
+
+        // 特殊处理数组的 length 字段
+        if (targetType.getSort() == Type.ARRAY && fieldName.equals("length")) {
+            methodVisitor.visitInsn(ARRAYLENGTH);
+            return Type.INT_TYPE;
+        }
+
         try {
             Class<?> targetClass = Class.forName(targetType.getClassName());
             Field field = targetClass.getField(fieldName);
             String owner = Type.getInternalName(field.getDeclaringClass());
             String descriptor = Type.getDescriptor(field.getType());
-            methodVisitor.visitFieldInsn(GETSTATIC, owner, fieldName, descriptor);
+
+            // 区分静态字段和实例字段
+            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                // 静态字段：需要先弹出栈上的类引用（因为 STATIC_ACCESS 生成的）
+                methodVisitor.visitInsn(POP);
+                methodVisitor.visitFieldInsn(GETSTATIC, owner, fieldName, descriptor);
+            } else {
+                // 实例字段：对象引用已经在栈上
+                methodVisitor.visitFieldInsn(GETFIELD, owner, fieldName, descriptor);
+            }
+
             return Type.getType(field.getType());
         } catch (ClassNotFoundException | NoSuchFieldException e) {
             throw new CompileError("Could not find field " + fieldName + " on class " + targetType.getClassName());

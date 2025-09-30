@@ -1,0 +1,119 @@
+import java.lang.System;
+import java.lang.Math;
+import java.lang.String;
+import java.lang.StringBuilder;
+
+// ============================================
+// Partic 0.6 完整特性展示
+// ============================================
+
+// 特性 1: 带返回值的函数
+def double calculateCircleArea(double radius) {
+    return Math.PI * radius * radius;
+}
+
+// 特性 2: 函数前向引用
+def void displayWelcome() {
+    System.out.println("欢迎使用 Partic 0.6!");
+    System.out.println(getVersion());
+}
+
+def String getVersion() {
+    return "Partic Compiler v0.6.0";
+}
+
+// 特性 3: 复杂的数学表达式 + 自动类型提升
+def double complexMath(int a, double b) {
+    // int 自动提升为 double
+    double result = a * 2.5 + b / 3.0 - Math.sqrt(a + b);
+    return result;
+}
+
+// 特性 4: 方法链式调用
+def void stringOperations() {
+    String message = "Hello";
+    System.out.println(
+        message.concat(" ")
+               .concat("World")
+               .concat("!")
+               .toUpperCase()
+    );
+}
+
+// 特性 5: 对象创建与方法调用
+def void builderPattern() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("Partic ");
+    sb.append("supports ");
+    sb.append("StringBuilder!");
+    System.out.println(sb.toString());
+}
+
+// 特性 6: 嵌套表达式与运算符优先级
+def int evaluate() {
+    // 运算符优先级: () > * / % > + -
+    return (2 + 3) * 4 - 10 / 2 + (8 % 3);
+}
+
+// 特性 7: 浮点数字面量 (float vs double)
+def void floatDemo() {
+    float f = 1.5f;      // float 字面量
+    double d = 2.5;      // double 字面量
+    double d2 = 3.14d;   // 显式 double 字面量
+
+    System.out.println(f + d + d2);
+}
+
+// 特性 8: 静态字段访问
+def void staticFieldAccess() {
+    System.out.println(Math.PI);
+    System.out.println(Math.E);
+}
+
+// 特性 9: 类型兼容与继承
+def void inheritanceDemo() {
+    // StringBuilder 是 Object 的子类
+    // println(Object) 可以接受 StringBuilder
+    StringBuilder builder = new StringBuilder();
+    builder.append("Type compatibility works!");
+    System.out.println(builder);
+}
+
+// 主函数：展示所有特性
+def void main(String[] args) {
+    System.out.println("========================================");
+    displayWelcome();
+    System.out.println("========================================");
+
+    System.out.println("\n[1] 带返回值的函数:");
+    System.out.println(calculateCircleArea(5.0));
+
+    System.out.println("\n[2] 复杂数学运算:");
+    System.out.println(complexMath(10, 20.5));
+
+    System.out.println("\n[3] 表达式求值:");
+    System.out.println(evaluate());
+
+    System.out.println("\n[4] 字符串操作:");
+    stringOperations();
+
+    System.out.println("\n[5] StringBuilder:");
+    builderPattern();
+
+    System.out.println("\n[6] 浮点数演示:");
+    floatDemo();
+
+    System.out.println("\n[7] 静态字段:");
+    staticFieldAccess();
+
+    System.out.println("\n[8] 继承与多态:");
+    inheritanceDemo();
+
+    System.out.println("\n[9] 数学函数嵌套:");
+    double nested = Math.sqrt(Math.abs(Math.sin(Math.PI / 4.0) * 100.0));
+    System.out.println(nested);
+
+    System.out.println("\n========================================");
+    System.out.println("所有特性展示完毕！");
+    System.out.println("========================================");
+}

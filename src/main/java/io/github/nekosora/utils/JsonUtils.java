@@ -133,10 +133,12 @@ public class JsonUtils {
      * @return 代表字面量的 JsonObject
      */
     public static JsonObject parseLiteral(ParticParser.LiteralContext ctx) {
+        String text = ctx.getText();
         if (ctx.StringLiteral() != null) {
-            String text = ctx.getText();
-            // 移除前后的引号
-            return generateStringLiteral(text.substring(1, text.length() - 1));
+            String content = text.substring(1, text.length() - 1);
+            // 处理转义字符
+            content = unescapeString(content);
+            return generateStringLiteral(content);
         } else if (ctx.IntegerLiteral() != null) {
             // 这里可以添加对 long, short 等类型的支持
             return generateIntLiteral(Integer.parseInt(ctx.getText()));
@@ -145,16 +147,35 @@ public class JsonUtils {
         } else if (ctx.NullLiteral() != null) {
             return generateNullLiteral();
         } else if (ctx.FloatingPointLiteral() != null) {
-            // 这里可以添加对 double 类型的支持
-            return generateFloatLiteral(Float.parseFloat(ctx.getText()));
+            // 根据后缀判断类型
+            if (text.endsWith("f") || text.endsWith("F")) {
+                return generateFloatLiteral(Float.parseFloat(text));
+            } else {
+                // 无后缀或 d/D 后缀都当 double
+                return generateDoubleLiteral(Double.parseDouble(text));
+            }
         } else if (ctx.CharacterLiteral() != null) {
-            String text = ctx.getText();
-            // 移除前后的单引号
-            return generateCharLiteral(text.charAt(1));
+            String content = text.substring(1, text.length() - 1);
+            char value = content.length() == 2 && content.charAt(0) == '\\'
+                    ? unescapeChar(content.charAt(1))
+                    : content.charAt(0);
+            return generateCharLiteral(value);
         } else {
             // 应该不存在这种情况，除非语法规则改变
             throw new IllegalArgumentException("无法解析的字面量: " + ctx.getText());
         }
+    }
+
+    private static char unescapeChar(char c) {
+        return switch (c) {
+            case 'n' -> '\n';
+            case 't' -> '\t';
+            case 'r' -> '\r';
+            case '\\' -> '\\';
+            case '\'' -> '\'';
+            case '"' -> '"';
+            default -> c;
+        };
     }
 
     public static JsonObject generateObjectCreation(String className, JsonArray args) {
@@ -163,5 +184,29 @@ public class JsonUtils {
         jsonObject.addProperty("className", className);
         jsonObject.add("args", args);
         return jsonObject;
+    }
+
+    private static String unescapeString(String str) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < str.length(); i++) {
+            char c = str.charAt(i);
+            if (c == '\\' && i + 1 < str.length()) {
+                char next = str.charAt(i + 1);
+                switch (next) {
+                    case 'n':  result.append('\n'); i++; break;
+                    case 't':  result.append('\t'); i++; break;
+                    case 'r':  result.append('\r'); i++; break;
+                    case '\\': result.append('\\'); i++; break;
+                    case '"':  result.append('"');  i++; break;
+                    case '\'': result.append('\''); i++; break;
+                    case 'b':  result.append('\b'); i++; break;
+                    case 'f':  result.append('\f'); i++; break;
+                    default:   result.append(c);         break;
+                }
+            } else {
+                result.append(c);
+            }
+        }
+        return result.toString();
     }
 }

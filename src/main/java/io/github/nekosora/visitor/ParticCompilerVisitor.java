@@ -224,32 +224,6 @@ public class ParticCompilerVisitor extends ParticBaseVisitor<JsonObject> {
     }
 
     @Override
-    public JsonObject visitLiteral(ParticParser.LiteralContext ctx) {
-        JsonObject literal = new JsonObject();
-        if (ctx.IntegerLiteral() != null) {
-            literal.addProperty("type", "intLiteral");
-            literal.addProperty("value", Integer.parseInt(ctx.getText()));
-        } else if (ctx.FloatingPointLiteral() != null) {
-            literal.addProperty("type", "doubleLiteral");
-            literal.addProperty("value", Double.parseDouble(ctx.getText()));
-        } else if (ctx.StringLiteral() != null) {
-            literal.addProperty("type", "stringLiteral");
-            String text = ctx.getText();
-            literal.addProperty("value", text.substring(1, text.length() - 1));
-        } else if (ctx.BooleanLiteral() != null) {
-            literal.addProperty("type", "booleanLiteral");
-            literal.addProperty("value", Boolean.parseBoolean(ctx.getText()));
-        } else if (ctx.CharacterLiteral() != null) {
-            literal.addProperty("type", "charLiteral");
-            String text = ctx.getText();
-            literal.addProperty("value", text.substring(1, text.length() - 1));
-        } else if (ctx.NullLiteral() != null) {
-            literal.addProperty("type", "nullLiteral");
-        }
-        return literal;
-    }
-
-    @Override
     public JsonObject visitReturnStatement(ParticParser.ReturnStatementContext ctx) {
         JsonObject action = new JsonObject();
         action.addProperty("type", "RETURN_STATEMENT");
