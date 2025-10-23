@@ -272,11 +272,197 @@ public class ParticCompilerVisitor extends ParticBaseVisitor<JsonObject> {
     }
 
     @Override
+    public JsonObject visitIfStatement(ParticParser.IfStatementContext ctx) {
+        JsonObject action = new JsonObject();
+        action.addProperty("type", "IF_STATEMENT");
+
+        // 处理条件表达式
+        action.add("condition", visit(ctx.expression()));
+
+        // 处理then分支
+        action.add("thenBranch", visit(ctx.statement(0)));
+
+        // 处理else分支（如果存在）
+        if (ctx.statement().size() > 1) {
+            action.add("elseBranch", visit(ctx.statement(1)));
+        }
+
+        return action;
+    }
+
+    @Override
+    public JsonObject visitRelationalExpression(ParticParser.RelationalExpressionContext ctx) {
+        JsonObject result = visit(ctx.shiftExpression(0));
+
+        for (int i = 1; i < ctx.shiftExpression().size(); i++) {
+            String operator = ctx.getChild(i * 2 - 1).getText(); // 获取 <, >, <=, >=
+            JsonObject right = visit(ctx.shiftExpression(i));
+
+            JsonObject comparison = new JsonObject();
+            comparison.addProperty("type", "COMPARISON");
+            comparison.addProperty("operator", operator);
+            comparison.add("left", result);
+            comparison.add("right", right);
+            result = comparison;
+        }
+
+        return result;
+    }
+
+    @Override
+    public JsonObject visitEqualityExpression(ParticParser.EqualityExpressionContext ctx) {
+        JsonObject result = visit(ctx.relationalExpression(0));
+
+        for (int i = 1; i < ctx.relationalExpression().size(); i++) {
+            String operator = ctx.getChild(i * 2 - 1).getText(); // 获取 ==, !=
+            JsonObject right = visit(ctx.relationalExpression(i));
+
+            JsonObject comparison = new JsonObject();
+            comparison.addProperty("type", "COMPARISON");
+            comparison.addProperty("operator", operator);
+            comparison.add("left", result);
+            comparison.add("right", right);
+            result = comparison;
+        }
+
+        return result;
+    }
+
+    @Override
+    public JsonObject visitConditionalAndExpression(ParticParser.ConditionalAndExpressionContext ctx) {
+        JsonObject result = visit(ctx.inclusiveOrExpression(0));
+
+        for (int i = 1; i < ctx.inclusiveOrExpression().size(); i++) {
+            JsonObject right = visit(ctx.inclusiveOrExpression(i));
+
+            JsonObject logicalOp = new JsonObject();
+            logicalOp.addProperty("type", "LOGICAL_OPERATION");
+            logicalOp.addProperty("operator", "&&");
+            logicalOp.add("left", result);
+            logicalOp.add("right", right);
+            result = logicalOp;
+        }
+
+        return result;
+    }
+
+    @Override
+    public JsonObject visitConditionalOrExpression(ParticParser.ConditionalOrExpressionContext ctx) {
+        JsonObject result = visit(ctx.conditionalAndExpression(0));
+
+        for (int i = 1; i < ctx.conditionalAndExpression().size(); i++) {
+            JsonObject right = visit(ctx.conditionalAndExpression(i));
+
+            JsonObject logicalOp = new JsonObject();
+            logicalOp.addProperty("type", "LOGICAL_OPERATION");
+            logicalOp.addProperty("operator", "||");
+            logicalOp.add("left", result);
+            logicalOp.add("right", right);
+            result = logicalOp;
+        }
+
+        return result;
+    }
+
+    @Override
+    public JsonObject visitUnaryExpression(ParticParser.UnaryExpressionContext ctx) {
+        if (ctx.postfixExpression() != null) {
+            return visit(ctx.postfixExpression());
+        }
+
+        // 处理一元运算符
+        String operator = ctx.getChild(0).getText();
+        JsonObject operand = visit(ctx.unaryExpression());
+
+        JsonObject unaryOp = new JsonObject();
+        unaryOp.addProperty("type", "UNARY_OPERATION");
+        unaryOp.addProperty("operator", operator);
+        unaryOp.add("operand", operand);
+
+        return unaryOp;
+    }
+
+    @Override
+    public JsonObject visitWhileStatement(ParticParser.WhileStatementContext ctx) {
+        JsonObject action = new JsonObject();
+        action.addProperty("type", "WHILE_STATEMENT");
+
+        // 处理条件表达式
+        action.add("condition", visit(ctx.expression()));
+
+        // 处理循环体
+        action.add("body", visit(ctx.statement()));
+
+        return action;
+    }
+
+    @Override
+    public JsonObject visitPostIncrementExpression(ParticParser.PostIncrementExpressionContext ctx) {
+        JsonObject action = new JsonObject();
+        action.addProperty("type", "POST_INCREMENT");
+        action.add("operand", visit(ctx.postfixExpression()));
+        return action;
+    }
+
+    @Override
+    public JsonObject visitPostDecrementExpression(ParticParser.PostDecrementExpressionContext ctx) {
+        JsonObject action = new JsonObject();
+        action.addProperty("type", "POST_DECREMENT");
+        action.add("operand", visit(ctx.postfixExpression()));
+        return action;
+    }
+
+    @Override
     protected JsonObject defaultResult() { return new JsonObject(); }
 
     @Override
-    protected JsonObject aggregateResult(JsonObject aggregate, JsonObject nextResult) {
-        return nextResult == null || nextResult.isEmpty() ? aggregate : nextResult;
+    public JsonObject visitBlock(ParticParser.BlockContext ctx) {
+        JsonObject blockAction = new JsonObject();
+        blockAction.addProperty("type", "BLOCK_STATEMENT");
+        JsonArray actions = new JsonArray();
+        for (ParticParser.StatementContext stmtCtx : ctx.statement()) {
+            JsonObject visitedAction = visit(stmtCtx);
+
+            if (visitedAction == null || !visitedAction.has("type")) {
+                // 详细信息
+                throw new CompileError(
+                        "Internal Visitor Error: A statement inside a block returned an invalid/empty JSON object.\n" +
+                                "Problematic Statement Text: \"" + stmtCtx.getText() + "\"\n" +
+                                "Location: line " + stmtCtx.getStart().getLine()
+                );
+            }
+            actions.add(visitedAction);
+        }
+        blockAction.add("actions", actions);
+        return blockAction;
+    }
+
+    @Override
+    public JsonObject visitPassThroughAssignment(ParticParser.PassThroughAssignmentContext ctx) {
+        return visit(ctx.conditionalExpression());
+    }
+
+    @Override
+    public JsonObject visitAssignmentAction(ParticParser.AssignmentActionContext ctx) {
+        JsonObject assignment = new JsonObject();
+        assignment.addProperty("type", "ASSIGNMENT");
+
+        // 取赋值目标（等号左边）
+        JsonObject target = visit(ctx.postfixExpression());
+
+        // 做一个简单的检查，确保我们是给一个变量赋值
+        if (!"VARIABLE_LOAD".equals(target.get("type").getAsString())) {
+            throw new CompileError("Assignment target must be a variable. Complex assignments (e.g., to fields) are not yet supported.");
+        }
+        assignment.add("target", target);
+
+        // 取赋值操作符，例如 "=" 或 "+="
+        assignment.addProperty("operator", ctx.assignmentOperator().getText());
+
+        // 取等号右边的值
+        assignment.add("value", visit(ctx.expression()));
+
+        return assignment;
     }
 
     private String resolveFullClassName(ParticParser.TypeContext typeCtx) {

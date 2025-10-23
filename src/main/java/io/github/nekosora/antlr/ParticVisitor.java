@@ -136,11 +136,19 @@ public interface ParticVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitExpression(ParticParser.ExpressionContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link ParticParser#assignmentExpression}.
+	 * Visit a parse tree produced by the {@code passThroughAssignment}
+	 * labeled alternative in {@link ParticParser#assignmentExpression}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitAssignmentExpression(ParticParser.AssignmentExpressionContext ctx);
+	T visitPassThroughAssignment(ParticParser.PassThroughAssignmentContext ctx);
+	/**
+	 * Visit a parse tree produced by the {@code assignmentAction}
+	 * labeled alternative in {@link ParticParser#assignmentExpression}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAssignmentAction(ParticParser.AssignmentActionContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link ParticParser#assignmentOperator}.
 	 * @param ctx the parse tree
@@ -221,49 +229,49 @@ public interface ParticVisitor<T> extends ParseTreeVisitor<T> {
 	T visitUnaryExpression(ParticParser.UnaryExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code primaryExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitPrimaryExpression(ParticParser.PrimaryExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code arrayAccessExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitArrayAccessExpression(ParticParser.ArrayAccessExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code fieldAccessExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitFieldAccessExpression(ParticParser.FieldAccessExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code methodCallExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitMethodCallExpression(ParticParser.MethodCallExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code functionCallExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitFunctionCallExpression(ParticParser.FunctionCallExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code postIncrementExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitPostIncrementExpression(ParticParser.PostIncrementExpressionContext ctx);
 	/**
 	 * Visit a parse tree produced by the {@code postDecrementExpression}
-	 * labeled alternative in {@link ParticParser#postfixExpression}.
+	 * labeled alternative in {@link ParticParser#postfixExpression()}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */

@@ -54,7 +54,7 @@ public class Main {
             ParticCompilerVisitor compiler = new ParticCompilerVisitor(path);
             compiler.visitProgram(tree);
 
-            System.out.println("编译成功！输出: " + path);
+            System.out.println("\n编译成功！输出: " + path);
             System.out.println("Compile success! Output: " + path);
 
             // 3. 可选：立即执行编译结果
@@ -83,14 +83,21 @@ public class Main {
     }
 
     private static void executeCompiledClass(String classDir, String className) {
-        try (URLClassLoader classLoader = new URLClassLoader(
-                new URL[]{new URI("file:///" + Paths.get(classDir.replace(" ", "%20")).toAbsolutePath()).toURL()},
-                Main.class.getClassLoader()
-        )) {
-            Class<?> compiledClass = classLoader.loadClass(className);
-            java.lang.reflect.Method mainMethod = compiledClass.getMethod("main", String[].class);
-            System.out.println("\n执行输出 | Run output:");
-            mainMethod.invoke(null, (Object) new String[]{});
+        try {
+            Path classDirPath = Paths.get(classDir).toAbsolutePath();
+
+            URL classUrl = classDirPath.toUri().toURL();
+
+            try (URLClassLoader classLoader = new URLClassLoader(
+                    new URL[]{classUrl},
+                    Main.class.getClassLoader()
+            )) {
+                Class<?> compiledClass = classLoader.loadClass(className);
+
+                java.lang.reflect.Method mainMethod = compiledClass.getMethod("main", String[].class);
+                System.out.println("\n执行输出 | Run output:");
+                mainMethod.invoke(null, (Object) new String[]{});
+            }
         } catch (Exception e) {
             System.err.println("执行失败 | Run code failed: " + e.getMessage());
             e.printStackTrace();

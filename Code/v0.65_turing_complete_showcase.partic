@@ -1,0 +1,149 @@
+import java.lang.System;
+import java.lang.StringBuilder as SB;
+
+def void main(str[] args) {
+    System.out.println("=== Boolean表达式测试 ===");
+
+    // 基础布尔变量
+    bool a = true;
+    bool b = false;
+    bool c = true;
+
+    // 逻辑运算测试
+    System.out.println(new SB().append("a = ").append(a).toString());
+    System.out.println(new SB().append("b = ").append(b).toString());
+    System.out.println(new SB().append("c = ").append(c).toString());
+
+    // 逻辑与测试
+    System.out.println(new SB().append("a && b = ").append(a && b).toString());
+    System.out.println(new SB().append("a && c = ").append(a && c).toString());
+    System.out.println(new SB().append("b && c = ").append(b && c).toString());
+
+    // 逻辑或测试
+    System.out.println(new SB().append("a || b = ").append(a || b).toString());
+    System.out.println(new SB().append("a || c = ").append(a || c).toString());
+    System.out.println(new SB().append("b || c = ").append(b || c).toString());
+
+    // 逻辑非测试
+    System.out.println(new SB().append("!a = ").append(!a).toString());
+    System.out.println(new SB().append("!b = ").append(!b).toString());
+
+    // 复杂布尔表达式
+    System.out.println(new SB().append("(a && b) || c = ").append((a && b) || c).toString());
+    System.out.println(new SB().append("!(a && b) = ").append(!(a && b)).toString());
+    System.out.println(new SB().append("a && !b = ").append(a && !b).toString());
+
+    System.out.println("=== If语句测试 ===");
+
+    // 简单if测试
+    if (a) {
+        System.out.println("a is true - 正确");
+    } else {
+        System.out.println("a is false - 错误");
+    }
+
+    if (b) {
+        System.out.println("b is true - 错误");
+    } else {
+        System.out.println("b is false - 正确");
+    }
+
+    // 嵌套if测试
+    if (a && c) {
+        System.out.println("a && c 都是 true");
+        if (!b) {
+            System.out.println("而且 b 是 false");
+        }
+    }
+
+    // if-else if 模式
+    if (a && b) {
+        System.out.println("情况1: a和b都是true");
+    } else if (a || b) {
+        System.out.println("情况2: a或b至少一个是true");
+    } else {
+        System.out.println("情况3: a和b都是false");
+    }
+
+    System.out.println("=== While循环测试 ===");
+
+    // 基础计数循环
+    int counter = 0;
+    System.out.println(new SB().append("开始计数循环: ").toString());
+
+    while (counter < 5) {
+        System.out.println(new SB().append("计数: ").append(counter).toString());
+        counter = counter + 1;
+    }
+
+    // 布尔条件控制的循环
+    bool continueLoop = true;
+    int loopCount = 0;
+    System.out.println(new SB().append("开始布尔控制循环: ").toString());
+
+    while (continueLoop) {
+        System.out.println(new SB().append("循环次数: ").append(loopCount).toString());
+        loopCount = loopCount + 1;
+
+        // 在特定条件下停止循环
+        if (loopCount >= 3) {
+            continueLoop = false;
+        }
+    }
+
+    // 复杂条件的循环
+    int x = 0;
+    int y = 10;
+    System.out.println(new SB().append("开始复杂条件循环: ").toString());
+
+    while (x < y && x < 5) {
+        System.out.println(new SB().append("x = ").append(x).append(", y = ").append(y).toString());
+        x = x + 1;
+        y = y - 1;
+    }
+
+    // 循环内的条件判断
+    int number = 0;
+    System.out.println(new SB().append("开始奇偶判断循环: ").toString());
+
+    while (number < 6) {
+        if (number % 2 == 0) {
+            System.out.println(new SB().append(number).append(" 是偶数").toString());
+        } else {
+            System.out.println(new SB().append(number).append(" 是奇数").toString());
+        }
+        number = number + 1;
+    }
+
+    System.out.println("=== 综合测试 ===");
+
+    // 综合测试：查找第一个满足条件的数字
+    int searchNum = 0;
+    bool found = false;
+
+    while (!found && searchNum < 10) {
+        // 条件：数字大于5且是偶数
+        if (searchNum > 5 && searchNum % 2 == 0) {
+            found = true;
+            System.out.println(new SB().append("找到满足条件的数字: ").append(searchNum).toString());
+        } else {
+            System.out.println(new SB().append("检查数字: ").append(searchNum).append(" - 不满足条件").toString());
+            searchNum = searchNum + 1;
+        }
+    }
+
+    if (!found) {
+        System.out.println("没有找到满足条件的数字");
+    }
+
+    System.out.println("=== 测试完成 ===");
+}
+
+// 辅助函数来测试布尔返回值
+def bool isEven(int num) {
+    return num % 2 == 0;
+}
+
+def bool isPositive(int num) {
+    return num > 0;
+}

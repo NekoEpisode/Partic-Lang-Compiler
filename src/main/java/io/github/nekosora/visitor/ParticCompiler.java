@@ -30,6 +30,8 @@ public class ParticCompiler {
     private MethodVisitor methodVisitor;
     private final String className;
 
+    private static final boolean SHOW_JSON_IR = true;
+
     private static final Map<Type, Integer> TYPE_RANK = Map.of(
             Type.INT_TYPE, 1,
             Type.LONG_TYPE, 2,
@@ -101,12 +103,33 @@ public class ParticCompiler {
     }
 
     private void generateAction(JsonObject action) {
-        System.out.println(action);
+        if (SHOW_JSON_IR) {
+            ParticLogger.codeGenDebug("JSON-IR: " + action);
+        }
         String type = action.get("type").getAsString();
         switch (type) {
             case "VARIABLE_DECLARATION" -> generateVariableDeclaration(action);
-            case "EXPRESSION_STATEMENT" -> generateExpression(action.get("expression").getAsJsonObject());
+            case "EXPRESSION_STATEMENT" -> {
+                Type expressionType = generateExpression(action.get("expression").getAsJsonObject());
+                // 表达式语句执行完后，其返回值（如果有的话）必须被丢弃
+                if (!expressionType.equals(Type.VOID_TYPE)) {
+                    // long 和 double 占用两个槽 (POP2)
+                    if (expressionType.getSize() == 2) {
+                        methodVisitor.visitInsn(POP2);
+                    } else { // 其他类型占用一个槽 (POP)
+                        methodVisitor.visitInsn(POP);
+                    }
+                }
+            }
             case "RETURN_STATEMENT" -> generateReturnStatement(action);
+            case "IF_STATEMENT" -> generateIfStatement(action);
+            case "WHILE_STATEMENT" -> generateWhileStatement(action);
+            case "BLOCK_STATEMENT" -> {
+                JsonArray actions = action.getAsJsonArray("actions");
+                for (JsonElement element : actions) {
+                    generateAction(element.getAsJsonObject());
+                }
+            }
         }
     }
 
@@ -215,6 +238,12 @@ public class ParticCompiler {
                 ParticFunction particFunction = context.getFunctionManager().getFunction(expr.get("name").getAsString());
                 if (particFunction == null) throw new CompileError("Function not found: " + expr.get("name").getAsString());
                 return Type.getMethodType(particFunction.getDescriptor());
+            case "COMPARISON": return generateComparison(expr);
+            case "LOGICAL_OPERATION": return generateLogicalOperation(expr);
+            case "UNARY_OPERATION": return generateUnaryOperation(expr);
+            case "POST_INCREMENT": return generatePostIncrement(expr);
+            case "POST_DECREMENT": return generatePostDecrement(expr);
+            case "ASSIGNMENT": return generateAssignment(expr);
             case "intLiteral":
                 methodVisitor.visitLdcInsn(expr.get("value").getAsInt());
                 return Type.INT_TYPE;
@@ -241,6 +270,363 @@ public class ParticCompiler {
                 return Type.getType(Object.class);
         }
         throw new CompileError("Unknown expression type: " + type);
+    }
+
+    private Type generateAssignment(JsonObject expr) {
+        JsonObject target = expr.getAsJsonObject("target");
+        String operator = expr.get("operator").getAsString();
+        JsonObject valueExpr = expr.getAsJsonObject("value");
+
+        // 目前我们只支持对简单变量的赋值
+        if (!"VARIABLE_LOAD".equals(target.get("type").getAsString())) {
+            throw new CompileError("Assignment target must be a simple variable.");
+        }
+
+        String varName = target.get("varName").getAsString();
+        VariableInfo varInfo = context.getLocalVariable(varName);
+        if (varInfo == null) {
+            throw new CompileError("Cannot assign to an undeclared variable: " + varName);
+        }
+
+        Type varType = Type.getType(varInfo.descriptor());
+        int varIndex = varInfo.index();
+
+        // 暂时只处理最简单的 "=" 赋值
+        // TODO: 实现更多赋值
+        if (!operator.equals("=")) {
+            throw new CompileError("Compound assignment operators like '" + operator + "' are not yet supported.");
+        }
+
+        Type valueType = generateExpression(valueExpr);
+
+        if (!valueType.equals(varType)) {
+            // TODO: 实现数字提升
+            throw new CompileError("Type mismatch: cannot assign " + valueType.getClassName() + " to " + varType.getClassName());
+        }
+
+        if (varType.getSize() == 2) { // long or double
+            methodVisitor.visitInsn(DUP2);
+        } else { // int, float, object refs, etc.
+            methodVisitor.visitInsn(DUP);
+        }
+
+        int storeOpcode = varType.getOpcode(ISTORE); // ISTORE, LSTORE, FSTORE, DSTORE, ASTORE
+        methodVisitor.visitVarInsn(storeOpcode, varIndex);
+
+        return varType;
+    }
+
+    private Type generatePostIncrement(JsonObject expr) {
+        JsonObject operand = expr.getAsJsonObject("operand");
+
+        if (operand.get("type").getAsString().equals("VARIABLE_LOAD")) {
+            String varName = operand.get("varName").getAsString();
+            VariableInfo varInfo = context.getLocalVariable(varName);
+            if (varInfo == null) {
+                throw new CompileError("Undefined variable: " + varName);
+            }
+
+            Type varType = Type.getType(varInfo.descriptor());
+            int varIndex = varInfo.index();
+
+            // 加载变量值（用于返回）
+            methodVisitor.visitVarInsn(varType.getOpcode(ILOAD), varIndex);
+
+            // 加载变量值（用于计算）
+            methodVisitor.visitVarInsn(varType.getOpcode(ILOAD), varIndex);
+
+            // 加1
+            if (varType.equals(Type.INT_TYPE)) {
+                methodVisitor.visitInsn(ICONST_1);
+                methodVisitor.visitInsn(IADD);
+            } else if (varType.equals(Type.LONG_TYPE)) {
+                methodVisitor.visitInsn(LCONST_1);
+                methodVisitor.visitInsn(LADD);
+            } else if (varType.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(FCONST_1);
+                methodVisitor.visitInsn(FADD);
+            } else if (varType.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(DCONST_1);
+                methodVisitor.visitInsn(DADD);
+            } else {
+                throw new CompileError("Cannot increment non-numeric type: " + varType);
+            }
+
+            // 存储新值
+            methodVisitor.visitVarInsn(varType.getOpcode(ISTORE), varIndex);
+
+            // 栈顶是旧值（后置递增返回旧值）
+            return varType;
+        }
+
+        throw new CompileError("POST_INCREMENT only supports variables");
+    }
+
+    private Type generatePostDecrement(JsonObject expr) {
+        JsonObject operand = expr.getAsJsonObject("operand");
+
+        if (operand.get("type").getAsString().equals("VARIABLE_LOAD")) {
+            String varName = operand.get("varName").getAsString();
+            VariableInfo varInfo = context.getLocalVariable(varName);
+            if (varInfo == null) {
+                throw new CompileError("Undefined variable: " + varName);
+            }
+
+            Type varType = Type.getType(varInfo.descriptor());
+            int varIndex = varInfo.index();
+
+            // 加载变量值（用于返回）
+            methodVisitor.visitVarInsn(varType.getOpcode(ILOAD), varIndex);
+
+            // 加载变量值（用于计算）
+            methodVisitor.visitVarInsn(varType.getOpcode(ILOAD), varIndex);
+
+            // 减1
+            if (varType.equals(Type.INT_TYPE)) {
+                methodVisitor.visitInsn(ICONST_1);
+                methodVisitor.visitInsn(ISUB);
+            } else if (varType.equals(Type.LONG_TYPE)) {
+                methodVisitor.visitInsn(LCONST_1);
+                methodVisitor.visitInsn(LSUB);
+            } else if (varType.equals(Type.FLOAT_TYPE)) {
+                methodVisitor.visitInsn(FCONST_1);
+                methodVisitor.visitInsn(FSUB);
+            } else if (varType.equals(Type.DOUBLE_TYPE)) {
+                methodVisitor.visitInsn(DCONST_1);
+                methodVisitor.visitInsn(DSUB);
+            } else {
+                throw new CompileError("Cannot decrement non-numeric type: " + varType);
+            }
+
+            // 存储新值
+            methodVisitor.visitVarInsn(varType.getOpcode(ISTORE), varIndex);
+
+            // 栈顶是旧值（后置递减返回旧值）
+            return varType;
+        }
+
+        throw new CompileError("POST_DECREMENT only supports variables");
+    }
+
+    private Type generateComparison(JsonObject expr) {
+        String operator = expr.get("operator").getAsString();
+        JsonObject leftExpr = expr.getAsJsonObject("left");
+        JsonObject rightExpr = expr.getAsJsonObject("right");
+
+        Type leftType = generateExpression(leftExpr);
+        Type rightType = generateExpression(rightExpr);
+
+        // 创建标签
+        org.objectweb.asm.Label trueLabel = new org.objectweb.asm.Label();
+        org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+        // 根据类型选择比较指令
+        if (leftType.equals(Type.INT_TYPE) && rightType.equals(Type.INT_TYPE)) {
+            int opcode = switch (operator) {
+                case "==" -> IF_ICMPEQ;
+                case "!=" -> IF_ICMPNE;
+                case "<" -> IF_ICMPLT;
+                case ">" -> IF_ICMPGT;
+                case "<=" -> IF_ICMPLE;
+                case ">=" -> IF_ICMPGE;
+                default -> throw new CompileError("Unknown comparison operator: " + operator);
+            };
+
+            methodVisitor.visitJumpInsn(opcode, trueLabel);
+            methodVisitor.visitInsn(ICONST_0);  // false
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);  // true
+            methodVisitor.visitLabel(endLabel);
+        } else if (leftType.equals(Type.LONG_TYPE) || rightType.equals(Type.LONG_TYPE)) {
+            // long类型比较
+            methodVisitor.visitInsn(LCMP);
+            int opcode = switch (operator) {
+                case "==" -> IFEQ;
+                case "!=" -> IFNE;
+                case "<" -> IFLT;
+                case ">" -> IFGT;
+                case "<=" -> IFLE;
+                case ">=" -> IFGE;
+                default -> throw new CompileError("Unknown comparison operator: " + operator);
+            };
+
+            methodVisitor.visitJumpInsn(opcode, trueLabel);
+            methodVisitor.visitInsn(ICONST_0);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);
+            methodVisitor.visitLabel(endLabel);
+        } else if (leftType.equals(Type.FLOAT_TYPE) || rightType.equals(Type.FLOAT_TYPE)) {
+            // float类型比较
+            methodVisitor.visitInsn(FCMPG);
+            int opcode = switch (operator) {
+                case "==" -> IFEQ;
+                case "!=" -> IFNE;
+                case "<" -> IFLT;
+                case ">" -> IFGT;
+                case "<=" -> IFLE;
+                case ">=" -> IFGE;
+                default -> throw new CompileError("Unknown comparison operator: " + operator);
+            };
+
+            methodVisitor.visitJumpInsn(opcode, trueLabel);
+            methodVisitor.visitInsn(ICONST_0);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);
+            methodVisitor.visitLabel(endLabel);
+        } else if (leftType.equals(Type.DOUBLE_TYPE) || rightType.equals(Type.DOUBLE_TYPE)) {
+            // double类型比较
+            methodVisitor.visitInsn(DCMPG);
+            int opcode = switch (operator) {
+                case "==" -> IFEQ;
+                case "!=" -> IFNE;
+                case "<" -> IFLT;
+                case ">" -> IFGT;
+                case "<=" -> IFLE;
+                case ">=" -> IFGE;
+                default -> throw new CompileError("Unknown comparison operator: " + operator);
+            };
+
+            methodVisitor.visitJumpInsn(opcode, trueLabel);
+            methodVisitor.visitInsn(ICONST_0);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);
+            methodVisitor.visitLabel(endLabel);
+        } else {
+            // 引用类型比较
+            if (operator.equals("==")) {
+                methodVisitor.visitJumpInsn(IF_ACMPEQ, trueLabel);
+            } else if (operator.equals("!=")) {
+                methodVisitor.visitJumpInsn(IF_ACMPNE, trueLabel);
+            } else {
+                throw new CompileError("Operator " + operator + " not supported for reference types");
+            }
+            methodVisitor.visitInsn(ICONST_0);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);
+            methodVisitor.visitLabel(endLabel);
+        }
+
+        return Type.BOOLEAN_TYPE;
+    }
+
+    private Type generateLogicalOperation(JsonObject expr) {
+        String operator = expr.get("operator").getAsString();
+        JsonObject leftExpr = expr.getAsJsonObject("left");
+        JsonObject rightExpr = expr.getAsJsonObject("right");
+
+        if (operator.equals("&&")) {
+            // 短路AND：如果left为false，直接返回false
+            org.objectweb.asm.Label falseLabel = new org.objectweb.asm.Label();
+            org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+            generateExpression(leftExpr);
+            methodVisitor.visitJumpInsn(IFEQ, falseLabel);  // left == false
+
+            generateExpression(rightExpr);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+
+            methodVisitor.visitLabel(falseLabel);
+            methodVisitor.visitInsn(ICONST_0);
+            methodVisitor.visitLabel(endLabel);
+
+        } else if (operator.equals("||")) {
+            // 短路OR：如果left为true，直接返回true
+            org.objectweb.asm.Label trueLabel = new org.objectweb.asm.Label();
+            org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+            generateExpression(leftExpr);
+            methodVisitor.visitJumpInsn(IFNE, trueLabel);  // left == true
+
+            generateExpression(rightExpr);
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+
+            methodVisitor.visitLabel(trueLabel);
+            methodVisitor.visitInsn(ICONST_1);
+            methodVisitor.visitLabel(endLabel);
+        } else {
+            throw new CompileError("Unknown logical operator: " + operator);
+        }
+
+        return Type.BOOLEAN_TYPE;
+    }
+
+    private Type generateUnaryOperation(JsonObject expr) {
+        String operator = expr.get("operator").getAsString();
+        JsonObject operand = expr.getAsJsonObject("operand");
+
+        switch (operator) {
+            case "!" -> {
+                // 逻辑非
+                generateExpression(operand);
+
+                org.objectweb.asm.Label trueLabel = new org.objectweb.asm.Label();
+                org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+                methodVisitor.visitJumpInsn(IFEQ, trueLabel);  // 如果为0(false)，跳到true
+
+                methodVisitor.visitInsn(ICONST_0);  // 否则返回false
+
+                methodVisitor.visitJumpInsn(GOTO, endLabel);
+                methodVisitor.visitLabel(trueLabel);
+                methodVisitor.visitInsn(ICONST_1);  // 返回true
+
+                methodVisitor.visitLabel(endLabel);
+
+                return Type.BOOLEAN_TYPE;
+            }
+            case "-" -> {
+                // 数值取负
+                Type operandType = generateExpression(operand);
+                int opcode = operandType.getOpcode(INEG);
+                methodVisitor.visitInsn(opcode);
+                return operandType;
+            }
+            case "+" -> {
+                // 数值取正（什么都不做）
+                return generateExpression(operand);
+                // 数值取正（什么都不做）
+            }
+            default -> throw new CompileError("Unsupported unary operator: " + operator);
+        }
+    }
+
+    private void generateWhileStatement(JsonObject action) {
+        JsonObject condition = action.getAsJsonObject("condition");
+        JsonObject body = action.getAsJsonObject("body");
+
+        // 创建标签
+        org.objectweb.asm.Label startLabel = new org.objectweb.asm.Label();
+        org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+        // 开始循环：startLabel
+        methodVisitor.visitLabel(startLabel);
+
+        // 添加Frame信息（告诉ASM这里的栈帧状态）
+        // F_SAME 表示栈帧与前一个相同
+        methodVisitor.visitFrame(org.objectweb.asm.Opcodes.F_SAME, 0, null, 0, null);
+
+        // 生成条件表达式
+        generateExpression(condition);
+
+        // 如果条件为假（0），跳出循环
+        methodVisitor.visitJumpInsn(IFEQ, endLabel);
+
+        // 生成循环体
+        generateAction(body);
+
+        // 跳回到循环开始
+        methodVisitor.visitJumpInsn(GOTO, startLabel);
+
+        // 循环结束标签
+        methodVisitor.visitLabel(endLabel);
+
+        // 添加Frame信息
+        methodVisitor.visitFrame(org.objectweb.asm.Opcodes.F_SAME, 0, null, 0, null);
     }
 
     private Type analyzeExpressionType(JsonObject expr) {
@@ -496,38 +882,37 @@ public class ParticCompiler {
         }
     }
 
-    private Type generateFieldAccess(JsonObject expr) {
-        JsonObject targetExpr = expr.getAsJsonObject("target");
-        String fieldName = expr.get("fieldName").getAsString();
+    private void generateIfStatement(JsonObject action) {
+        JsonObject condition = action.getAsJsonObject("condition");
+        JsonObject thenBranch = action.getAsJsonObject("thenBranch");
+        JsonObject elseBranch = action.has("elseBranch") ? action.getAsJsonObject("elseBranch") : null;
 
-        Type targetType = generateExpression(targetExpr);
+        // 生成条件表达式的字节码
+        generateExpression(condition);
 
-        // 特殊处理数组的 length 字段
-        if (targetType.getSort() == Type.ARRAY && fieldName.equals("length")) {
-            methodVisitor.visitInsn(ARRAYLENGTH);
-            return Type.INT_TYPE;
+        // 创建标签
+        org.objectweb.asm.Label elseLabel = new org.objectweb.asm.Label();
+        org.objectweb.asm.Label endLabel = new org.objectweb.asm.Label();
+
+        // 如果条件为假，跳转到else标签
+        methodVisitor.visitJumpInsn(IFEQ, elseBranch != null ? elseLabel : endLabel);
+
+        // 生成then分支
+        generateAction(thenBranch);
+
+        // 如果有else分支，跳过它
+        if (elseBranch != null) {
+            methodVisitor.visitJumpInsn(GOTO, endLabel);
+
+            // else分支
+            methodVisitor.visitLabel(elseLabel);
+            methodVisitor.visitFrame(org.objectweb.asm.Opcodes.F_SAME, 0, null, 0, null);
+            generateAction(elseBranch);
         }
 
-        try {
-            Class<?> targetClass = Class.forName(targetType.getClassName());
-            Field field = targetClass.getField(fieldName);
-            String owner = Type.getInternalName(field.getDeclaringClass());
-            String descriptor = Type.getDescriptor(field.getType());
-
-            // 区分静态字段和实例字段
-            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                // 静态字段：需要先弹出栈上的类引用（因为 STATIC_ACCESS 生成的）
-                methodVisitor.visitInsn(POP);
-                methodVisitor.visitFieldInsn(GETSTATIC, owner, fieldName, descriptor);
-            } else {
-                // 实例字段：对象引用已经在栈上
-                methodVisitor.visitFieldInsn(GETFIELD, owner, fieldName, descriptor);
-            }
-
-            return Type.getType(field.getType());
-        } catch (ClassNotFoundException | NoSuchFieldException e) {
-            throw new CompileError("Could not find field " + fieldName + " on class " + targetType.getClassName());
-        }
+        // 结束标签
+        methodVisitor.visitLabel(endLabel);
+        methodVisitor.visitFrame(org.objectweb.asm.Opcodes.F_SAME, 0, null, 0, null);
     }
 
     private Type generateVariableLoad(JsonObject expr) {
