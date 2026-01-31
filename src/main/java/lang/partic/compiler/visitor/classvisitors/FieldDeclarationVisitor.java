@@ -1,14 +1,18 @@
 package lang.partic.compiler.visitor.classvisitors;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import lang.partic.compiler.antlr.ParticBaseVisitor;
 import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
 import lang.partic.compiler.exceptions.CompileError;
+import lang.partic.compiler.ir.ParticAnnotation;
+import lang.partic.compiler.ir.ParticField;
+import lang.partic.compiler.ir.ParticModifiers;
 import lang.partic.compiler.manager.ImportManager;
 
-public class FieldDeclarationVisitor extends ParticBaseVisitor<JsonArray> {
+import java.util.ArrayList;
+import java.util.List;
+
+public class FieldDeclarationVisitor extends ParticBaseVisitor<List<ParticField>> {
     private final VisitContext context;
 
     public FieldDeclarationVisitor(VisitContext context) {
@@ -33,45 +37,36 @@ public class FieldDeclarationVisitor extends ParticBaseVisitor<JsonArray> {
     }
 
     @Override
-    public JsonArray visitFieldDeclaration(ParticParser.FieldDeclarationContext ctx) {
-        JsonArray fields = new JsonArray();
+    public List<ParticField> visitFieldDeclaration(ParticParser.FieldDeclarationContext ctx) {
+        List<ParticField> fields = new ArrayList<>();
         
         // 提取公共信息
-        // 字段修饰符 - 按照IR格式分为access和others
-        String access = "pub"; // 默认public
-        JsonArray others = new JsonArray();
-        
+        // 字段修饰符
+        ParticModifiers modifiers = new ParticModifiers();
         if (ctx.modifiers() != null) {
             for (ParticParser.ModifierContext modCtx : ctx.modifiers().modifier()) {
                 String mod = modCtx.getText();
                 // 访问修饰符：pub, priv, prot, pack
                 switch (mod) {
-                    case "pub", "priv", "prot", "pack" -> access = mod;
-                    default -> others.add(mod);
+                    case "pub", "priv", "prot", "pack" -> modifiers.setAccess(mod);
+                    default -> modifiers.addOther(mod);
                 }
             }
         }
-        
-        JsonObject fieldModifiers = new JsonObject();
-        fieldModifiers.addProperty("access", access);
-        fieldModifiers.add("others", others);
         
         // 字段类型 - 解析为完整类名
         String fieldType = ctx.type().getText();
         String resolvedType = resolveType(fieldType);
         
         // 注解
-        JsonArray annotations = new JsonArray();
+        List<ParticAnnotation> annotations = new ArrayList<>();
         for (ParticParser.AnnotationContext annCtx : ctx.annotation()) {
-            JsonObject annotation = new JsonObject();
             String annotationType = annCtx.qualifiedName().getText();
             String resolvedAnnotation = resolveType(annotationType);
-            annotation.addProperty("annotation", resolvedAnnotation);
+            ParticAnnotation annotation = new ParticAnnotation(resolvedAnnotation);
             
             if (annCtx.elementValuePairs() != null) {
-                JsonArray args = new JsonArray();
                 // TODO: 解析注解参数
-                annotation.add("args", args);
             }
             
             annotations.add(annotation);
@@ -79,20 +74,22 @@ public class FieldDeclarationVisitor extends ParticBaseVisitor<JsonArray> {
         
         // 处理每个变量声明
         for (ParticParser.VariableDeclaratorContext varCtx : ctx.variableDeclarator()) {
-            JsonObject field = new JsonObject();
-            field.add("modifiers", fieldModifiers.deepCopy());
-            field.addProperty("type", resolvedType);
-            field.addProperty("name", varCtx.IDENTIFIER().getText());
+            String fieldName = varCtx.IDENTIFIER().getText();
+            ParticField field = new ParticField(resolvedType, fieldName);
+            
+            // 复制修饰符
+            ParticModifiers fieldModifiers = new ParticModifiers();
+            fieldModifiers.setAccess(modifiers.getAccess());
+            for (String other : modifiers.getOthers()) {
+                fieldModifiers.addOther(other);
+            }
+            field.setModifiers(fieldModifiers);
             
             // 初始值(如果有)
             if (varCtx.expression() != null) {
-                // TODO: 解析表达式值
-                field.addProperty("value", varCtx.expression().getText());
-            }
-            
-            // 注解(如果有)
-            if (!annotations.isEmpty()) {
-                field.add("annotations", annotations.deepCopy());
+                // TODO: 字段初始化表达式需要在类初始化时处理，暂时保存文本
+                // 后续可能需要生成静态初始化块或实例初始化块
+                field.setValue(varCtx.expression().getText());
             }
             
             fields.add(field);

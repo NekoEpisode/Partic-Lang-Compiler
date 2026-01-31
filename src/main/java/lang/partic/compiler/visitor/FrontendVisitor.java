@@ -1,17 +1,15 @@
 package lang.partic.compiler.visitor;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import lang.partic.compiler.StaticValues;
 import lang.partic.compiler.antlr.ParticBaseVisitor;
 import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
+import lang.partic.compiler.ir.ParticClass;
+import lang.partic.compiler.ir.ParticProgram;
 import lang.partic.compiler.visitor.classvisitors.ImportDeclarationVisitor;
 
 import java.nio.file.Path;
-import java.time.Instant;
 
-public class FrontendVisitor extends ParticBaseVisitor<JsonObject> {
+public class FrontendVisitor extends ParticBaseVisitor<ParticProgram> {
     private final Path sourceFile;
     private final VisitContext context;
     private final ClassDeclarationVisitor classDeclarationVisitor;
@@ -25,41 +23,26 @@ public class FrontendVisitor extends ParticBaseVisitor<JsonObject> {
     }
 
     @Override
-    public JsonObject visitProgram(ParticParser.ProgramContext ctx) {
-        JsonObject ir = new JsonObject();
-        JsonObject metadata = new JsonObject();
+    public ParticProgram visitProgram(ParticParser.ProgramContext ctx) {
+        ParticProgram program = new ParticProgram(sourceFile.getFileName().toString());
 
-        // 构建metadata
-        Instant now = Instant.now();
-        String timestamp = now.toString();
-        metadata.addProperty("generated", timestamp);
-        metadata.addProperty("ir_version", StaticValues.IR_VERSION);
-        metadata.addProperty("source_file", sourceFile.getFileName().toString());
-        ir.add("metadata", metadata);
-
-        // 处理 import 声明
+        // 处理 import 声明 - 这里需要手动控制顺序（先处理 import）
         for (ParticParser.ImportDeclarationContext importCtx : ctx.importDeclaration()) {
             importVisitor.visitImportDeclaration(importCtx);
         }
 
         // 收集所有类型声明
-        JsonArray classes = new JsonArray();
         for (ParticParser.TypeDeclarationContext typeCtx : ctx.typeDeclaration()) {
             if (typeCtx.classDeclaration() != null) {
-                ParticParser.ClassDeclarationContext classCtx = typeCtx.classDeclaration();
-                JsonObject classIR = visitClassDeclaration(classCtx);
-                classes.add(classIR);
+                ParticClass particClass = classDeclarationVisitor.visitClassDeclaration(typeCtx.classDeclaration());
+                if (particClass != null) {
+                    program.addClass(particClass);
+                }
             }
             // TODO: 处理 interface 和 enum
         }
-        ir.add("classes", classes);
 
-        return ir;
-    }
-
-    @Override
-    public JsonObject visitClassDeclaration(ParticParser.ClassDeclarationContext ctx) {
-        return classDeclarationVisitor.visitClassDeclaration(ctx);
+        return program;
     }
 
     public Path getSourceFile() {

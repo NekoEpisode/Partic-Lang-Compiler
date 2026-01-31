@@ -48,7 +48,7 @@ enumBodyDeclaration
     ;
 
 functionDeclaration
-    : modifiers type IDENTIFIER '(' parameterList? ')' block
+    : modifiers type IDENTIFIER '(' parameterList? ')' (block | '->' expression ';')
     ;
 
 modifiers
@@ -121,8 +121,7 @@ constantDeclaration
     ;
 
 methodDeclaration
-    : annotation* modifiers type IDENTIFIER '(' parameterList? ')'
-      (block | ';')
+    : annotation* modifiers type IDENTIFIER '(' parameterList? ')' (block | '->' expression ';' | ';')
     ;
 
 abstractMethodDeclaration
@@ -130,11 +129,11 @@ abstractMethodDeclaration
     ;
 
 defaultMethodDeclaration
-    : modifiers 'default' type IDENTIFIER '(' parameterList? ')' block
+    : modifiers 'default' type IDENTIFIER '(' parameterList? ')' (block | '->' expression ';')
     ;
 
 staticMethodDeclaration
-    : modifiers 'static' type IDENTIFIER '(' parameterList? ')' block
+    : modifiers 'static' type IDENTIFIER '(' parameterList? ')' (block | '->' expression ';')
     ;
 
 constructorDeclaration

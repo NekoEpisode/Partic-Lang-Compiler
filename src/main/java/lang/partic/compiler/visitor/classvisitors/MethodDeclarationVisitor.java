@@ -1,14 +1,16 @@
 package lang.partic.compiler.visitor.classvisitors;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import lang.partic.compiler.antlr.ParticBaseVisitor;
 import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
 import lang.partic.compiler.exceptions.CompileError;
+import lang.partic.compiler.ir.*;
+import lang.partic.compiler.ir.ParticMethodBody.ReturnStatement;
 import lang.partic.compiler.manager.ImportManager;
+import lang.partic.compiler.visitor.expressionvisitors.ExpressionVisitor;
+import lang.partic.compiler.visitor.statementvisitors.StatementVisitor;
 
-public class MethodDeclarationVisitor extends ParticBaseVisitor<JsonObject> {
+public class MethodDeclarationVisitor extends ParticBaseVisitor<ParticMethod> {
     private final VisitContext context;
 
     public MethodDeclarationVisitor(VisitContext context) {
@@ -33,97 +35,93 @@ public class MethodDeclarationVisitor extends ParticBaseVisitor<JsonObject> {
     }
 
     @Override
-    public JsonObject visitMethodDeclaration(ParticParser.MethodDeclarationContext ctx) {
-        JsonObject method = new JsonObject();
+    public ParticMethod visitMethodDeclaration(ParticParser.MethodDeclarationContext ctx) {
+        // 返回类型 - 解析为完整类名
+        String returnType = ctx.type().getText();
+        String resolvedReturnType = resolveType(returnType);
         
-        // 方法修饰符 - 按照IR格式分为access和others
-        String access = "pub"; // 默认public
-        JsonArray others = new JsonArray();
+        // 创建方法对象
+        String methodName = ctx.IDENTIFIER().getText();
+        ParticMethod method = new ParticMethod(methodName, resolvedReturnType);
         
+        // 方法修饰符
+        ParticModifiers modifiers = new ParticModifiers();
         if (ctx.modifiers() != null) {
             for (ParticParser.ModifierContext modCtx : ctx.modifiers().modifier()) {
                 String mod = modCtx.getText();
                 // 访问修饰符：pub, priv, prot, pack
                 switch (mod) {
-                    case "pub", "priv", "prot", "pack" -> access = mod;
-                    default -> others.add(mod);
+                    case "pub", "priv", "prot", "pack" -> modifiers.setAccess(mod);
+                    default -> modifiers.addOther(mod);
                 }
             }
         }
-        
-        JsonObject methodModifiers = new JsonObject();
-        methodModifiers.addProperty("access", access);
-        methodModifiers.add("others", others);
-        method.add("modifiers", methodModifiers);
+        method.setModifiers(modifiers);
         
         // 注解
-        JsonArray annotations = new JsonArray();
         for (ParticParser.AnnotationContext annCtx : ctx.annotation()) {
-            JsonObject annotation = new JsonObject();
             String annotationType = annCtx.qualifiedName().getText();
             String resolvedAnnotation = resolveType(annotationType);
-            annotation.addProperty("annotation", resolvedAnnotation);
+            ParticAnnotation annotation = new ParticAnnotation(resolvedAnnotation);
             
             if (annCtx.elementValuePairs() != null) {
-                JsonArray args = new JsonArray();
                 // TODO: 解析注解参数
-                annotation.add("args", args);
             }
             
-            annotations.add(annotation);
+            method.addAnnotation(annotation);
         }
-        method.add("annotations", annotations);
-        
-        // 返回类型 - 解析为完整类名
-        String returnType = ctx.type().getText();
-        String resolvedReturnType = resolveType(returnType);
-        method.addProperty("return_type", resolvedReturnType);
         
         // 参数
-        JsonArray params = new JsonArray();
         if (ctx.parameterList() != null) {
             for (ParticParser.ParameterContext paramCtx : ctx.parameterList().parameter()) {
-                JsonObject param = new JsonObject();
-                
                 // 参数类型 - 解析为完整类名
                 String paramType = paramCtx.type().getText();
                 String resolvedParamType = resolveType(paramType);
-                param.addProperty("type", resolvedParamType);
-                param.addProperty("name", paramCtx.IDENTIFIER().getText());
+                String paramName = paramCtx.IDENTIFIER().getText();
+                
+                ParticParameter param = new ParticParameter(resolvedParamType, paramName);
                 
                 // 参数注解
-                if (!paramCtx.annotation().isEmpty()) {
-                    JsonArray paramAnnotations = new JsonArray();
-                    for (ParticParser.AnnotationContext annCtx : paramCtx.annotation()) {
-                        JsonObject annotation = new JsonObject();
-                        String annotationType = annCtx.qualifiedName().getText();
-                        String resolvedAnnotation = resolveType(annotationType);
-                        annotation.addProperty("annotation", resolvedAnnotation);
-                        
-                        if (annCtx.elementValuePairs() != null) {
-                            JsonArray args = new JsonArray();
-                            // TODO: 解析注解参数
-                            annotation.add("args", args);
-                        }
-                        
-                        paramAnnotations.add(annotation);
+                for (ParticParser.AnnotationContext annCtx : paramCtx.annotation()) {
+                    String annotationType = annCtx.qualifiedName().getText();
+                    String resolvedAnnotation = resolveType(annotationType);
+                    ParticAnnotation annotation = new ParticAnnotation(resolvedAnnotation);
+                    
+                    if (annCtx.elementValuePairs() != null) {
+                        // TODO: 解析注解参数
                     }
-                    param.add("annotations", paramAnnotations);
+                    
+                    param.addAnnotation(annotation);
                 }
                 
-                params.add(param);
+                method.addParameter(param);
             }
         }
-        method.add("parameters", params);
         
         // 方法体
         if (ctx.block() != null) {
-            JsonObject body = new JsonObject();
-            body.add("locals", new JsonObject());
-            body.add("temps", new JsonObject());
-            body.add("statements", new JsonArray());
-            method.add("body", body);
-            // TODO: 处理方法体语句
+            // 传统块语法: { ... }
+            ParticMethodBody body = new ParticMethodBody();
+            
+            // 使用StatementVisitor处理方法体
+            StatementVisitor stmtVisitor = new StatementVisitor(body, context);
+            for (ParticParser.StatementContext stmtCtx : ctx.block().statement()) {
+                stmtVisitor.visit(stmtCtx);
+            }
+
+            method.setBody(body);
+        } else if (ctx.expression() != null) {
+            // 表达式体语法: -> expression;
+            ParticMethodBody body = new ParticMethodBody();
+            
+            // 创建ExpressionVisitor处理表达式
+            ExpressionVisitor exprVisitor = new ExpressionVisitor(body, context);
+            String tempName = exprVisitor.visit(ctx.expression());
+            
+            // 自动生成return语句
+            body.addStatement(new ReturnStatement(tempName));
+            
+            method.setBody(body);
         }
         
         return method;

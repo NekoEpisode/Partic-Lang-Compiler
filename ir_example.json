@@ -84,8 +84,8 @@
           ],
           "body": {
             "locals": {
-              "x": {"type": "int"},
-              "message": {"type": "java.lang.String"}
+              "x": {"type": "int", "scope": 0, "modifiers": ["final"]},
+              "message": {"type": "java.lang.String", "scope": 0, "modifiers": []}
             },
             "temps": {
               "t0": {"op": "const", "type": "int", "value": 10},
@@ -132,7 +132,7 @@
           ],
           "body": {
             "locals": {
-              "result": {"type": "int"}
+              "result": {"type": "int", "scope": 1, "modifiers": []}
             },
             "temps": {
               "t0": {"op": "param", "type": "int", "index": 0},
@@ -144,6 +144,10 @@
               "t6": {"op": "cmp_gt", "type": "boolean", "operands": ["t4", "t5"]}
             },
             "statements": [
+              {
+                "op": "scope_enter",
+                "scope_id": 1
+              },
               {
                 "op": "if",
                 "condition": "t6",
@@ -161,6 +165,10 @@
                     "value": {"op": "neg", "type": "int", "operands": ["t4"]}
                   }
                 ]
+              },
+              {
+                "op": "scope_exit",
+                "scope_id": 1
               },
               {
                 "op": "return",
@@ -189,8 +197,8 @@
           ],
           "body": {
             "locals": {
-              "i": {"type": "int"},
-              "sum": {"type": "int"}
+              "i": {"type": "int", "scope": 0, "modifiers": []},
+              "sum": {"type": "int", "scope": 0, "modifiers": []}
             },
             "temps": {
               "t0": {"op": "const", "type": "int", "value": 0},

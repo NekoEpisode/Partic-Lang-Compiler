@@ -4,6 +4,8 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import lang.partic.compiler.antlr.ParticLexer;
 import lang.partic.compiler.antlr.ParticParser;
+import lang.partic.compiler.ir.ParticIRGenerator;
+import lang.partic.compiler.ir.ParticProgram;
 import lang.partic.compiler.visitor.FrontendVisitor;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
@@ -19,14 +21,12 @@ public class Main {
     void main() {
         String source =
                 """
-                import java.lang.Override as Ov;
-                import lang.partic.NotNull;
+                class Main {
+                    int test(int x) -> x + 5;
+                }
                 
-                @lang.partic.Test
-                class Main extends lang.partic.Test implements lang.partic.I1, lang.partic.I2 {
-                    @Ov
-                    static void main(@NotNull str[] args, int x) {}
-                    Main() {}
+                priv final class Test {
+                    int test(int y) -> y - 5;
                 }
                 """;
 
@@ -37,8 +37,13 @@ public class Main {
 
         ParticParser.ProgramContext tree = parser.program();
 
+        // Visitor构建中间表示
         FrontendVisitor visitor = new FrontendVisitor(Path.of("./debug"));
-        JsonObject ir = visitor.visitProgram(tree);
+        ParticProgram program = visitor.visitProgram(tree);
+
+        // IRGenerator生成JSON
+        ParticIRGenerator irGenerator = new ParticIRGenerator();
+        JsonObject ir = irGenerator.generate(program);
 
         String json = new GsonBuilder().setPrettyPrinting().create().toJson(ir);
         log.debug("得到的IR: {}", json);
