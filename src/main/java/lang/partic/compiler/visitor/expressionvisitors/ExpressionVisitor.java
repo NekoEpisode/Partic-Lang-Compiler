@@ -21,13 +21,11 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
 
     @Override
     public String visitExpression(ParticParser.ExpressionContext ctx) {
-        // expression: assignmentExpression
         return visit(ctx.assignmentExpression());
     }
 
     @Override
     public String visitAssignmentExpression(ParticParser.AssignmentExpressionContext ctx) {
-        // assignmentExpression: conditionalExpression | postfixExpression assignmentOperator expression
         if (ctx.assignmentOperator() != null) {
             // TODO: 处理赋值表达式
             return visitChildren(ctx);
@@ -37,7 +35,6 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
 
     @Override
     public String visitConditionalExpression(ParticParser.ConditionalExpressionContext ctx) {
-        // conditionalExpression: conditionalOrExpression ('?' expression ':' conditionalExpression)?
         if (ctx.getChildCount() > 1) {
             // TODO: 处理三元运算符
             return visitChildren(ctx);
@@ -47,103 +44,75 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
 
     @Override
     public String visitConditionalOrExpression(ParticParser.ConditionalOrExpressionContext ctx) {
-        // conditionalOrExpression: conditionalAndExpression ('||' conditionalAndExpression)*
         String result = visit(ctx.conditionalAndExpression(0));
-        
         for (int i = 1; i < ctx.conditionalAndExpression().size(); i++) {
             String right = visit(ctx.conditionalAndExpression(i));
-            
-            TempVar temp = new TempVar("or", "boolean");
+            TempVar temp = new TempVar("or");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitConditionalAndExpression(ParticParser.ConditionalAndExpressionContext ctx) {
-        // conditionalAndExpression: inclusiveOrExpression ('&&' inclusiveOrExpression)*
         String result = visit(ctx.inclusiveOrExpression(0));
-        
         for (int i = 1; i < ctx.inclusiveOrExpression().size(); i++) {
             String right = visit(ctx.inclusiveOrExpression(i));
-            
-            TempVar temp = new TempVar("and", "boolean");
+            TempVar temp = new TempVar("and");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitInclusiveOrExpression(ParticParser.InclusiveOrExpressionContext ctx) {
-        // inclusiveOrExpression: exclusiveOrExpression ('|' exclusiveOrExpression)*
         String result = visit(ctx.exclusiveOrExpression(0));
-        
         for (int i = 1; i < ctx.exclusiveOrExpression().size(); i++) {
             String right = visit(ctx.exclusiveOrExpression(i));
-            
-            TempVar temp = new TempVar("bitor", "int");
+            TempVar temp = new TempVar("bitor");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitExclusiveOrExpression(ParticParser.ExclusiveOrExpressionContext ctx) {
-        // exclusiveOrExpression: andExpression ('^' andExpression)*
         String result = visit(ctx.andExpression(0));
-        
         for (int i = 1; i < ctx.andExpression().size(); i++) {
             String right = visit(ctx.andExpression(i));
-            
-            TempVar temp = new TempVar("bitxor", "int");
+            TempVar temp = new TempVar("bitxor");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitAndExpression(ParticParser.AndExpressionContext ctx) {
-        // andExpression: equalityExpression ('&' equalityExpression)*
         String result = visit(ctx.equalityExpression(0));
-        
         for (int i = 1; i < ctx.equalityExpression().size(); i++) {
             String right = visit(ctx.equalityExpression(i));
-            
-            TempVar temp = new TempVar("bitand", "int");
+            TempVar temp = new TempVar("bitand");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitEqualityExpression(ParticParser.EqualityExpressionContext ctx) {
-        // equalityExpression: relationalExpression (('==' | '!=' | '===' | '!==') relationalExpression)*
         String result = visit(ctx.relationalExpression(0));
-        
         for (int i = 1; i < ctx.relationalExpression().size(); i++) {
             String right = visit(ctx.relationalExpression(i));
             String op = ctx.getChild(2 * i - 1).getText();
-            
             String opName = switch (op) {
                 case "==" -> "cmp_eq";
                 case "!=" -> "cmp_ne";
@@ -151,26 +120,20 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
                 case "!==" -> "cmp_ne_strict";
                 default -> "cmp_eq";
             };
-            
-            TempVar temp = new TempVar(opName, "boolean");
+            TempVar temp = new TempVar(opName);
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitRelationalExpression(ParticParser.RelationalExpressionContext ctx) {
-        // relationalExpression: shiftExpression (('<' | '>' | '<=' | '>=' | 'instanceof' | 'in') shiftExpression)*
         String result = visit(ctx.shiftExpression(0));
-        
         for (int i = 1; i < ctx.shiftExpression().size(); i++) {
             String right = visit(ctx.shiftExpression(i));
             String op = ctx.getChild(2 * i - 1).getText();
-            
             String opName = switch (op) {
                 case "<" -> "cmp_lt";
                 case ">" -> "cmp_gt";
@@ -180,95 +143,73 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
                 case "in" -> "in";
                 default -> "cmp_lt";
             };
-            
-            TempVar temp = new TempVar(opName, "boolean");
+            TempVar temp = new TempVar(opName);
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitShiftExpression(ParticParser.ShiftExpressionContext ctx) {
-        // shiftExpression: additiveExpression (('<<' | '>>' | '>>>') additiveExpression)*
         String result = visit(ctx.additiveExpression(0));
-        
         for (int i = 1; i < ctx.additiveExpression().size(); i++) {
             String right = visit(ctx.additiveExpression(i));
             String op = ctx.getChild(2 * i - 1).getText();
-            
             String opName = switch (op) {
                 case "<<" -> "shl";
                 case ">>" -> "shr";
                 case ">>>" -> "ushr";
                 default -> "shl";
             };
-            
-            TempVar temp = new TempVar(opName, "int");
+            TempVar temp = new TempVar(opName);
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitAdditiveExpression(ParticParser.AdditiveExpressionContext ctx) {
-        // additiveExpression: multiplicativeExpression (('+' | '-') multiplicativeExpression)*
         String result = visit(ctx.multiplicativeExpression(0));
-        
         for (int i = 1; i < ctx.multiplicativeExpression().size(); i++) {
             String right = visit(ctx.multiplicativeExpression(i));
             String op = ctx.getChild(2 * i - 1).getText();
-            
-            TempVar temp = new TempVar(op.equals("+") ? "add" : "sub", "int");
+            TempVar temp = new TempVar(op.equals("+") ? "add" : "sub");
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitMultiplicativeExpression(ParticParser.MultiplicativeExpressionContext ctx) {
-        // multiplicativeExpression: unaryExpression (('*' | '/' | '%') unaryExpression)*
         String result = visit(ctx.unaryExpression(0));
-        
         for (int i = 1; i < ctx.unaryExpression().size(); i++) {
             String right = visit(ctx.unaryExpression(i));
             String op = ctx.getChild(2 * i - 1).getText();
-            
             String opName = switch (op) {
                 case "*" -> "mul";
                 case "/" -> "div";
                 case "%" -> "mod";
                 default -> "mul";
             };
-            
-            TempVar temp = new TempVar(opName, "int");
+            TempVar temp = new TempVar(opName);
             temp.addOperand(result);
             temp.addOperand(right);
-            
             result = body.addTemp(temp);
         }
-        
         return result;
     }
 
     @Override
     public String visitUnaryExpression(ParticParser.UnaryExpressionContext ctx) {
-        // unaryExpression: ('+' | '-' | '++' | '--' | '!' | '~') unaryExpression | castExpression | postfixExpression
         if (ctx.unaryExpression() != null) {
             String operand = visit(ctx.unaryExpression());
             String op = ctx.getChild(0).getText();
-            
             String opName = switch (op) {
                 case "+" -> "pos";
                 case "-" -> "neg";
@@ -278,29 +219,23 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
                 case "~" -> "bitnot";
                 default -> "pos";
             };
-            
-            TempVar temp = new TempVar(opName, "int");
+            TempVar temp = new TempVar(opName);
             temp.addOperand(operand);
-            
             return body.addTemp(temp);
         }
-        
         if (ctx.castExpression() != null) {
             return visit(ctx.castExpression());
         }
-        
         return visit(ctx.postfixExpression());
     }
 
     @Override
     public String visitCastExpression(ParticParser.CastExpressionContext ctx) {
-        // castExpression: '(' type ')' unaryExpression
         String operand = visit(ctx.unaryExpression());
         String targetType = ctx.type().getText();
-        
-        TempVar temp = new TempVar("cast", targetType);
+        TempVar temp = new TempVar("cast");
+        temp.putMetadata("target_type", targetType);
         temp.addOperand(operand);
-        
         return body.addTemp(temp);
     }
 
@@ -318,20 +253,15 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
         if (ctx.literal() != null) {
             return visit(ctx.literal());
         }
-        
         if (ctx.IDENTIFIER() != null) {
-            // 变量引用
             String varName = ctx.IDENTIFIER().getText();
-            TempVar temp = new TempVar("load", "int"); // TODO: 获取实际类型
+            TempVar temp = new TempVar("load");
             temp.addOperand(varName);
             return body.addTemp(temp);
         }
-        
         if (ctx.expression() != null) {
-            // 括号表达式
             return visit(ctx.expression());
         }
-        
         // TODO: 处理 this, super, new, lambda等
         return visitChildren(ctx);
     }
@@ -340,40 +270,34 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
     public String visitLiteral(ParticParser.LiteralContext ctx) {
         if (ctx.IntegerLiteral() != null) {
             int value = Integer.parseInt(ctx.IntegerLiteral().getText());
-            TempVar temp = new TempVar("const", "int");
+            TempVar temp = new TempVar("const");
             temp.setValue(value);
             return body.addTemp(temp);
         }
-        
         if (ctx.FloatingPointLiteral() != null) {
             double value = Double.parseDouble(ctx.FloatingPointLiteral().getText());
-            TempVar temp = new TempVar("const", "double");
+            TempVar temp = new TempVar("const");
             temp.setValue(value);
             return body.addTemp(temp);
         }
-        
         if (ctx.BooleanLiteral() != null) {
             boolean value = ctx.BooleanLiteral().getText().equals("true");
-            TempVar temp = new TempVar("const", "boolean");
+            TempVar temp = new TempVar("const");
             temp.setValue(value);
             return body.addTemp(temp);
         }
-        
         if (ctx.StringLiteral() != null) {
             String value = ctx.StringLiteral().getText();
-            // 去掉引号
             value = value.substring(1, value.length() - 1);
-            TempVar temp = new TempVar("const", "java.lang.String");
+            TempVar temp = new TempVar("const");
             temp.setValue(value);
             return body.addTemp(temp);
         }
-        
         if (ctx.NullLiteral() != null) {
-            TempVar temp = new TempVar("const", "null");
+            TempVar temp = new TempVar("const");
             temp.setValue(null);
             return body.addTemp(temp);
         }
-        
         // TODO: 处理 CharacterLiteral, TextBlockLiteral
         return visitChildren(ctx);
     }

@@ -22,11 +22,12 @@ public class Main {
         String source =
                 """
                 class Main {
-                    int test(int x) -> x + 5;
-                }
-                
-                priv final class Test {
-                    int test(int y) -> y - 5;
+                    int test(int x) {
+                        int y = x + 5;
+                        {
+                            int z = x + y;
+                        }
+                    }
                 }
                 """;
 

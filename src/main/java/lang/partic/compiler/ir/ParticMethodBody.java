@@ -101,24 +101,18 @@ public class ParticMethodBody {
      */
     public static class TempVar {
         private String op;
-        private String type;
         private Object value; // 用于常量
         private List<String> operands; // 操作数（可以是其他temp或local的名字）
-        private Map<String, Object> metadata; // 额外信息（如class, field, method等）
+        private Map<String, Object> metadata; // 额外信息（如object, field, method等）
 
-        public TempVar(String op, String type) {
+        public TempVar(String op) {
             this.op = op;
-            this.type = type;
             this.operands = new ArrayList<>();
             this.metadata = new HashMap<>();
         }
 
         public String getOp() {
             return op;
-        }
-
-        public String getType() {
-            return type;
         }
 
         public Object getValue() {

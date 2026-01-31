@@ -283,7 +283,6 @@ public class ParticIRGenerator {
     private JsonObject generateTempVar(ParticMethodBody.TempVar temp) {
         JsonObject tempObj = new JsonObject();
         tempObj.addProperty("op", temp.getOp());
-        tempObj.addProperty("type", temp.getType());
         
         if (temp.getValue() != null) {
             tempObj.add("value", convertValue(temp.getValue()));
@@ -297,7 +296,7 @@ public class ParticIRGenerator {
             tempObj.add("operands", operands);
         }
         
-        // metadata (如class, field, method等)
+        // metadata (如object, field, method等)
         for (Map.Entry<String, Object> entry : temp.getMetadata().entrySet()) {
             tempObj.add(entry.getKey(), convertValue(entry.getValue()));
         }

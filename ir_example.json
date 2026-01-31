@@ -88,15 +88,15 @@
               "message": {"type": "java.lang.String", "scope": 0, "modifiers": []}
             },
             "temps": {
-              "t0": {"op": "const", "type": "int", "value": 10},
-              "t1": {"op": "const", "type": "int", "value": 10},
-              "t2": {"op": "add", "type": "int", "operands": ["t0", "t1"]},
-              "t3": {"op": "const", "type": "int", "value": 10},
-              "t4": {"op": "sub", "type": "int", "operands": ["t2", "t3"]},
-              "t5": {"op": "const", "type": "java.lang.String", "value": "Hello! "},
-              "t6": {"op": "to_string", "type": "java.lang.String", "operands": ["x"]},
-              "t7": {"op": "concat", "type": "java.lang.String", "operands": ["t5", "t6"]},
-              "t8": {"op": "get_static", "type": "java.io.PrintStream", "class": "java.lang.System", "field": "out"}
+              "t0": {"op": "const", "value": 10},
+              "t1": {"op": "const", "value": 10},
+              "t2": {"op": "add", "operands": ["t0", "t1"]},
+              "t3": {"op": "const", "value": 10},
+              "t4": {"op": "sub", "operands": ["t2", "t3"]},
+              "t5": {"op": "const", "value": "Hello! "},
+              "t6": {"op": "to_string", "operands": ["x"]},
+              "t7": {"op": "concat", "operands": ["t5", "t6"]},
+              "t8": {"op": "field_access", "object": "java.lang.System", "field": "out"}
             },
             "statements": [
               {
@@ -110,7 +110,7 @@
                 "value": "t7"
               },
               {
-                "op": "call_virtual",
+                "op": "call_method",
                 "object": "t8",
                 "method": "println",
                 "signature": ["java.lang.String"],
@@ -135,13 +135,13 @@
               "result": {"type": "int", "scope": 1, "modifiers": []}
             },
             "temps": {
-              "t0": {"op": "param", "type": "int", "index": 0},
-              "t1": {"op": "param", "type": "int", "index": 1},
-              "t2": {"op": "add", "type": "int", "operands": ["t0", "t1"]},
-              "t3": {"op": "const", "type": "int", "value": 2},
-              "t4": {"op": "mul", "type": "int", "operands": ["t2", "t3"]},
-              "t5": {"op": "const", "type": "int", "value": 0},
-              "t6": {"op": "cmp_gt", "type": "boolean", "operands": ["t4", "t5"]}
+              "t0": {"op": "param", "index": 0},
+              "t1": {"op": "param", "index": 1},
+              "t2": {"op": "add", "operands": ["t0", "t1"]},
+              "t3": {"op": "const", "value": 2},
+              "t4": {"op": "mul", "operands": ["t2", "t3"]},
+              "t5": {"op": "const", "value": 0},
+              "t6": {"op": "cmp_gt", "operands": ["t4", "t5"]}
             },
             "statements": [
               {
@@ -162,7 +162,7 @@
                   {
                     "op": "assign",
                     "target": "result",
-                    "value": {"op": "neg", "type": "int", "operands": ["t4"]}
+                    "value": {"op": "neg", "operands": ["t4"]}
                   }
                 ]
               },
@@ -201,8 +201,8 @@
               "sum": {"type": "int", "scope": 0, "modifiers": []}
             },
             "temps": {
-              "t0": {"op": "const", "type": "int", "value": 0},
-              "t1": {"op": "param", "type": "int", "index": 0}
+              "t0": {"op": "const", "value": 0},
+              "t1": {"op": "param", "index": 0}
             },
             "statements": [
               {
@@ -217,17 +217,17 @@
               },
               {
                 "op": "while",
-                "condition": {"op": "cmp_lt", "type": "boolean", "operands": ["i", "t1"]},
+                "condition": {"op": "cmp_lt", "operands": ["i", "t1"]},
                 "body": [
                   {
                     "op": "assign",
                     "target": "sum",
-                    "value": {"op": "add", "type": "int", "operands": ["sum", "i"]}
+                    "value": {"op": "add", "operands": ["sum", "i"]}
                   },
                   {
                     "op": "assign",
                     "target": "i",
-                    "value": {"op": "add", "type": "int", "operands": ["i", {"op": "const", "type": "int", "value": 1}]}
+                    "value": {"op": "add", "operands": ["i", {"op": "const", "value": 1}]}
                   }
                 ]
               }
