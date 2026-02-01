@@ -4,8 +4,8 @@ import lang.partic.compiler.compile.classes.ClassCompiler;
 import lang.partic.compiler.ir.ParticClass;
 import lang.partic.compiler.ir.ParticProgram;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ParticCompiler {
     private final ParticProgram program;
@@ -14,11 +14,11 @@ public class ParticCompiler {
         this.program = program;
     }
 
-    public List<byte[]> compile() {
-        List<byte[]> bytecodes = new ArrayList<>();
+    public CompileResult compile() {
+        Map<String, byte[]> bytecodes = new HashMap<>();
         for (ParticClass particClass : program.getClasses()) {
-            bytecodes.add(new ClassCompiler(particClass).compile());
+            bytecodes.put(particClass.getName(), new ClassCompiler(particClass).compile());
         }
-        return bytecodes;
+        return new CompileResult(bytecodes);
     }
 }

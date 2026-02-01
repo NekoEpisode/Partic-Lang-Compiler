@@ -79,21 +79,34 @@ public class StatementCompiler {
         if (stmt.getValue() != null) {
             // 有返回值的 return
             String value = stmt.getValue();
+            String valueType = null;
             
             // 编译返回值表达式
             TempVar valueTemp = body.getTemps().get(value);
             if (valueTemp != null) {
+                valueType = valueTemp.getType();
                 new ExpressionCompiler(valueTemp, body, context).compile();
             } else {
                 // 可能是局部变量
                 LocalVar local = body.getLocals().get(value);
                 if (local != null) {
+                    valueType = local.getType();
                     int loadOp = getLoadOpcode(local.getType());
                     int index = context.getIndexManager().getIndex(value);
                     mv.visitVarInsn(loadOp, index);
                 } else {
                     log.warn("  找不到返回值: {}", value);
                     return;
+                }
+            }
+            
+            // 如果返回值类型与方法返回类型不同，需要类型转换
+            if (valueType != null && returnType != null && !valueType.equals(returnType)) {
+                int castOp = getCastOpcode(valueType, returnType);
+                if (castOp != 0) {
+                    mv.visitInsn(castOp);
+                } else {
+                    log.warn("  无法将返回值类型 '{}' 转换为方法返回类型 '{}'", valueType, returnType);
                 }
             }
             
@@ -184,6 +197,34 @@ public class StatementCompiler {
             case "float" -> Opcodes.FRETURN;
             case "double" -> Opcodes.DRETURN;
             default -> Opcodes.ARETURN;
+        };
+    }
+
+    /**
+     * 获取类型转换指令的操作码
+     */
+    private int getCastOpcode(String fromType, String toType) {
+        if (fromType == null || toType == null) return 0;
+        if (fromType.equals(toType)) return 0;
+
+        // 数值类型转换
+        return switch (fromType + "->" + toType) {
+            case "int->long" -> Opcodes.I2L;
+            case "int->float" -> Opcodes.I2F;
+            case "int->double" -> Opcodes.I2D;
+            case "long->int" -> Opcodes.L2I;
+            case "long->float" -> Opcodes.L2F;
+            case "long->double" -> Opcodes.L2D;
+            case "float->int" -> Opcodes.F2I;
+            case "float->long" -> Opcodes.F2L;
+            case "float->double" -> Opcodes.F2D;
+            case "double->int" -> Opcodes.D2I;
+            case "double->long" -> Opcodes.D2L;
+            case "double->float" -> Opcodes.D2F;
+            case "int->byte" -> Opcodes.I2B;
+            case "int->char" -> Opcodes.I2C;
+            case "int->short" -> Opcodes.I2S;
+            default -> 0; // 不需要转换或引用类型转换
         };
     }
 }

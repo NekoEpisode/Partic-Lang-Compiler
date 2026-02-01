@@ -49,6 +49,17 @@ public class MethodCompiler {
 
         new MethodBodyCompiler(particMethod.getBody(), context).compile();
 
+        // 检查 void 方法是否以 return 结束，如果没有则添加 RETURN 指令
+        String returnType = particMethod.getReturnType();
+        if (returnType != null && returnType.equals("void")) {
+            var statements = particMethod.getBody().getStatements();
+            boolean endsWithReturn = !statements.isEmpty() && 
+                                    statements.get(statements.size() - 1).getOp().equals("return");
+            if (!endsWithReturn) {
+                mv.visitInsn(Opcodes.RETURN);
+            }
+        }
+
         mv.visitMaxs(-1, -1);
         mv.visitEnd();
     }

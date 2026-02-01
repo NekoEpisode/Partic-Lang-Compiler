@@ -2,6 +2,7 @@ package lang.partic.compiler;
 
 import lang.partic.compiler.antlr.ParticLexer;
 import lang.partic.compiler.antlr.ParticParser;
+import lang.partic.compiler.compile.CompileResult;
 import lang.partic.compiler.compile.ParticCompiler;
 import lang.partic.compiler.ir.ParticProgram;
 import lang.partic.compiler.visitor.FrontendVisitor;
@@ -16,7 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class Main {
@@ -26,14 +27,20 @@ public class Main {
         String source =
                 """
                 import java.lang.System;
-                import java.nio.file.Path;
                 
                 class Main {
                     static void main() {
                         System.out.println(test(3));
+                        Test.test();
                     }
                     
-                    priv double test(int x) -> x * 5;
+                    priv static double test(int x) -> x * 5;
+                }
+                
+                class Test {
+                    static void test() {
+                        System.out.println("Hello from Test!");
+                    }
                 }
                 """;
 
@@ -50,7 +57,7 @@ public class Main {
         ParticProgram program = visitor.visitProgram(tree);
 
         ParticCompiler compiler = new ParticCompiler(program);
-        List<byte[]> bytecodes = compiler.compile();
+        CompileResult compileResult = compiler.compile();
 
         File dir = new File("./debug");
         if (!dir.exists()) {
@@ -61,10 +68,10 @@ public class Main {
             }
         }
 
-        for (int i = 0; i < bytecodes.size(); i++) {
-            byte[] bytecode = bytecodes.get(i);
+        for (Map.Entry<String, byte[]> entry : compileResult.bytecodes().entrySet()) {
+            byte[] bytecode = entry.getValue();
             System.out.println("得到的class字节码: " + Arrays.toString(bytecode));
-            File file = new File("./debug/bytecode_" + i + ".class");
+            File file = new File("./debug/" + entry.getKey() + ".class");
             try {
                 if (!file.exists()) {
                     file.createNewFile();
