@@ -4,6 +4,7 @@ import lang.partic.compiler.compile.expressions.ExpressionCompiler;
 import lang.partic.compiler.context.CompileContext;
 import lang.partic.compiler.ir.ParticMethodBody;
 import lang.partic.compiler.ir.ParticMethodBody.*;
+import lang.partic.compiler.utils.TypeUtils;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.slf4j.Logger;
@@ -43,10 +44,21 @@ public class StatementCompiler {
         
         log.debug("  赋值: {} = {}", target, value);
         
+        // 获取目标类型
+        LocalVar targetLocal = body.getLocals().get(target);
+        if (targetLocal == null) {
+            log.warn("  找不到赋值目标变量: {} (locals keys: {})", target, body.getLocals().keySet());
+            return;
+        }
+        String targetType = targetLocal.getType();
+        
         // 编译右侧表达式
+        String valueType = null;
         TempVar valueTemp = body.getTemps().get(value);
         if (valueTemp != null) {
+            log.debug("  编译右侧表达式: {} (op={}, type={})", value, valueTemp.getOp(), valueTemp.getType());
             new ExpressionCompiler(valueTemp, body, context).compile();
+            valueType = valueTemp.getType();
         } else {
             // 可能是局部变量，直接加载
             LocalVar local = body.getLocals().get(value);
@@ -54,22 +66,49 @@ public class StatementCompiler {
                 int loadOp = getLoadOpcode(local.getType());
                 int index = context.getIndexManager().getIndex(value);
                 context.getMv().visitVarInsn(loadOp, index);
+                valueType = local.getType();
             } else {
                 log.warn("  找不到赋值右侧的值: {}", value);
                 return;
             }
         }
         
-        // 存储到目标变量
-        LocalVar targetLocal = body.getLocals().get(target);
-        if (targetLocal != null) {
-            String targetType = targetLocal.getType();
-            int storeOp = getStoreOpcode(targetType);
-            int index = context.getIndexManager().getIndex(target);
-            context.getMv().visitVarInsn(storeOp, index);
-        } else {
-            log.warn("  找不到赋值目标变量: {}", target);
+        // 自动拆箱：如果目标类型是基本类型，而值类型是对应的包装类型
+        if (TypeUtils.isPrimitive(targetType) && valueType != null && !TypeUtils.isPrimitive(valueType)) {
+            String unboxedType = TypeUtils.getUnboxedType(valueType);
+            if (unboxedType != null && unboxedType.equals(targetType)) {
+                // 调用拆箱方法
+                String unboxMethod = TypeUtils.getUnboxMethodName(valueType);
+                if (unboxMethod != null) {
+                    String boxedTypeInternal = TypeUtils.toInternalName(valueType);
+                    String unboxedTypeDescriptor = TypeUtils.toDescriptor(unboxedType);
+                    context.getMv().visitMethodInsn(Opcodes.INVOKEVIRTUAL, boxedTypeInternal, unboxMethod,
+                        "()" + unboxedTypeDescriptor, false);
+                    log.debug("  自动拆箱: {} -> {}", valueType, targetType);
+                }
+            }
         }
+        
+        // 自动装箱：如果目标类型是包装类型，而值类型是对应的基本类型
+        if (!TypeUtils.isPrimitive(targetType) && valueType != null && TypeUtils.isPrimitive(valueType)) {
+            String boxedType = TypeUtils.getBoxedType(valueType);
+            if (boxedType != null && boxedType.equals(targetType)) {
+                // 调用静态方法 valueOf
+                String boxedTypeInternal = TypeUtils.toInternalName(boxedType);
+                String boxMethodDescriptor = TypeUtils.getBoxMethodDescriptor(valueType);
+                if (boxMethodDescriptor != null) {
+                    context.getMv().visitMethodInsn(Opcodes.INVOKESTATIC, boxedTypeInternal, "valueOf",
+                        boxMethodDescriptor, false);
+                    log.debug("  自动装箱: {} -> {}", valueType, targetType);
+                }
+            }
+        }
+        
+        // 存储到目标变量
+        int storeOp = getStoreOpcode(targetType);
+        int index = context.getIndexManager().getIndex(target);
+        log.debug("  存储到变量: {} (type={}, index={}, op={})", target, targetType, index, storeOp);
+        context.getMv().visitVarInsn(storeOp, index);
     }
 
     private void compileReturn(ReturnStatement stmt) {
@@ -100,6 +139,45 @@ public class StatementCompiler {
                 }
             }
             
+            // 自动拆箱：如果返回类型是基本类型，而值类型是对应的包装类型
+            if (TypeUtils.isPrimitive(returnType) && valueType != null && !TypeUtils.isPrimitive(valueType)) {
+                String unboxedType = TypeUtils.getUnboxedType(valueType);
+                if (unboxedType != null && unboxedType.equals(returnType)) {
+                    // 调用拆箱方法
+                    String unboxMethod = TypeUtils.getUnboxMethodName(valueType);
+                    if (unboxMethod != null) {
+                        String boxedTypeInternal = TypeUtils.toInternalName(valueType);
+                        String unboxedTypeDescriptor = TypeUtils.toDescriptor(unboxedType);
+                        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, boxedTypeInternal, unboxMethod,
+                            "()" + unboxedTypeDescriptor, false);
+                        log.debug("  自动拆箱返回值: {} -> {}", valueType, returnType);
+                        // 拆箱后类型已匹配，直接返回
+                        int returnOp = getReturnOpcode(returnType);
+                        mv.visitInsn(returnOp);
+                        return;
+                    }
+                }
+            }
+
+            // 自动装箱：如果返回类型是包装类型，而值类型是对应的基本类型
+            if (!TypeUtils.isPrimitive(returnType) && valueType != null && TypeUtils.isPrimitive(valueType)) {
+                String boxedType = TypeUtils.getBoxedType(valueType);
+                if (boxedType != null && boxedType.equals(returnType)) {
+                    // 调用静态方法 valueOf
+                    String boxedTypeInternal = TypeUtils.toInternalName(boxedType);
+                    String boxMethodDescriptor = TypeUtils.getBoxMethodDescriptor(valueType);
+                    if (boxMethodDescriptor != null) {
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, boxedTypeInternal, "valueOf",
+                            boxMethodDescriptor, false);
+                        log.debug("  自动装箱返回值: {} -> {}", valueType, returnType);
+                        // 装箱后类型已匹配，直接返回
+                        int returnOp = getReturnOpcode(returnType);
+                        mv.visitInsn(returnOp);
+                        return;
+                    }
+                }
+            }
+
             // 如果返回值类型与方法返回类型不同，需要类型转换
             if (valueType != null && returnType != null && !valueType.equals(returnType)) {
                 int castOp = getCastOpcode(valueType, returnType);

@@ -79,6 +79,11 @@ public class FieldDeclarationVisitor extends ParticBaseVisitor<List<ParticField>
             }
             field.setModifiers(fieldModifiers);
             
+            // 添加注解
+            for (ParticAnnotation annotation : annotations) {
+                field.addAnnotation(annotation);
+            }
+            
             // 初始值(如果有)
             if (varCtx.expression() != null) {
                 // TODO: 字段初始化表达式需要在类初始化时处理，暂时保存文本

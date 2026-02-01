@@ -49,13 +49,41 @@ public class ExternalClassLoader {
             classSymbol.setFullName(className);
 
             // 使用 ASM 访问类结构
-            reader.accept(new ClassInfoVisitor(classSymbol), ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG);
+            ClassInfoVisitor visitor = new ClassInfoVisitor(classSymbol);
+            reader.accept(visitor, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG);
+            
+            // 加载并设置父类
+            String superClassName = visitor.getSuperClassName();
+            if (superClassName != null) {
+                ClassSymbol superClass = loadClass(superClassName);
+                if (superClass != null) {
+                    classSymbol.setSuperClass(superClass);
+                    log.debug("设置父类: {} -> {}", className, superClassName);
+                } else {
+                    log.warn("无法加载父类: {} (对于类 {})", superClassName, className);
+                }
+            }
+            
+            // 加载并设置接口
+            String[] interfaceNames = visitor.getInterfaceNames();
+            if (interfaceNames != null) {
+                for (String interfaceName : interfaceNames) {
+                    ClassSymbol interfaceSymbol = loadClass(interfaceName);
+                    if (interfaceSymbol != null) {
+                        classSymbol.addInterface(interfaceSymbol);
+                        log.debug("设置接口: {} -> {}", className, interfaceName);
+                    } else {
+                        log.warn("无法加载接口: {} (对于类 {})", interfaceName, className);
+                    }
+                }
+            }
 
             cache.put(className, classSymbol);
-            log.debug("加载外部类: {} (字段={}, 方法={})", 
+            log.debug("加载外部类: {} (字段={}, 方法={}, 父类={})", 
                 className, 
                 classSymbol.getFields().size(),
-                classSymbol.getAllMethods().size());
+                classSymbol.getAllMethods().size(),
+                superClassName);
             
             return classSymbol;
             
@@ -99,15 +127,41 @@ public class ExternalClassLoader {
             this.classSymbol = classSymbol;
         }
 
+        private String superClassName; // 暂存父类名
+        private String[] interfaceNames; // 暂存接口名
+        
         @Override
         public void visit(int version, int access, String name, String signature, 
                           String superName, String[] interfaces) {
             classSymbol.setModifiers(access);
             
             // 记录父类名称（延迟加载，在需要时再解析）
-            if (superName != null && !superName.equals("java/lang/Object")) {
-                classSymbol.setType(superName.replace('/', '.'));  // 用 type 字段暂存父类名
+            // 即使是 Object 也需要加载，因为其他类可能继承自 Object
+            if (superName != null) {
+                this.superClassName = superName.replace('/', '.');
+                log.debug("ClassInfoVisitor.visit: 类 {} 的父类是 {}", classSymbol.getName(), this.superClassName);
+            } else {
+                this.superClassName = null;
+                log.debug("ClassInfoVisitor.visit: 类 {} 没有父类", classSymbol.getName());
             }
+            
+            // 记录接口名称
+            if (interfaces != null && interfaces.length > 0) {
+                this.interfaceNames = new String[interfaces.length];
+                for (int i = 0; i < interfaces.length; i++) {
+                    this.interfaceNames[i] = interfaces[i].replace('/', '.');
+                }
+                log.debug("ClassInfoVisitor.visit: 类 {} 实现了接口 {}", 
+                    classSymbol.getName(), String.join(", ", this.interfaceNames));
+            }
+        }
+        
+        public String getSuperClassName() {
+            return superClassName;
+        }
+        
+        public String[] getInterfaceNames() {
+            return interfaceNames;
         }
 
         @Override
@@ -145,6 +199,13 @@ public class ExternalClassLoader {
             String[] paramTypes = getParameterTypes(descriptor);
             for (int i = 0; i < paramTypes.length; i++) {
                 method.addParameter("arg" + i, paramTypes[i]);
+            }
+            
+            // 调试：打印 nextDouble 方法
+            if (name.equals("nextDouble")) {
+                log.debug("发现方法: {} {} {} (access={}, public={})", 
+                    classSymbol.getName(), name, descriptor, 
+                    access, (access & Opcodes.ACC_PUBLIC) != 0);
             }
             
             if (isConstructor) {

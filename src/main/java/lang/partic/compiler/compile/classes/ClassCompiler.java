@@ -3,6 +3,7 @@ package lang.partic.compiler.compile.classes;
 import lang.partic.compiler.compile.methods.MethodCompiler;
 import lang.partic.compiler.context.CompileContext;
 import lang.partic.compiler.ir.ParticClass;
+import lang.partic.compiler.ir.ParticField;
 import lang.partic.compiler.ir.ParticMethod;
 import lang.partic.compiler.utils.ClassNameUtils;
 import org.objectweb.asm.ClassWriter;
@@ -52,6 +53,58 @@ public class ClassCompiler {
                 ClassNameUtils.replaceAllDotToSlash(particClass.getExtendsClass()),
                 impls
         );
+        
+        // 添加类注解
+        for (var annotation : particClass.getAnnotations()) {
+            String descriptor = "L" + annotation.getAnnotation().replace('.', '/') + ";";
+            classWriter.visitAnnotation(descriptor, true);  // true 表示运行时可见
+        }
+        
+        // 编译字段
+        for (ParticField field : particClass.getFields()) {
+            int fieldAccess = Opcodes.ACC_PUBLIC;
+            switch (field.getModifiers().getAccess()) {
+                case "priv" -> fieldAccess = Opcodes.ACC_PRIVATE;
+                case "prot" -> fieldAccess = Opcodes.ACC_PROTECTED;
+                case "pack" -> fieldAccess = 0;
+            }
+            for (String modifier : field.getModifiers().getOthers()) {
+                switch (modifier) {
+                    case "static" -> fieldAccess |= Opcodes.ACC_STATIC;
+                    case "final" -> fieldAccess |= Opcodes.ACC_FINAL;
+                }
+            }
+            
+            String fieldDescriptor = "L" + field.getType().replace('.', '/') + ";";
+            // 基本类型需要特殊处理
+            fieldDescriptor = switch (field.getType()) {
+                case "int" -> "I";
+                case "long" -> "J";
+                case "float" -> "F";
+                case "double" -> "D";
+                case "bool" -> "Z";
+                case "byte" -> "B";
+                case "char" -> "C";
+                case "short" -> "S";
+                default -> fieldDescriptor;
+            };
+            
+            var fieldVisitor = classWriter.visitField(
+                fieldAccess,
+                field.getName(),
+                fieldDescriptor,
+                null,
+                null  // 常量值，暂时不支持
+            );
+            
+            // 添加字段注解
+            for (var annotation : field.getAnnotations()) {
+                String annDescriptor = "L" + annotation.getAnnotation().replace('.', '/') + ";";
+                fieldVisitor.visitAnnotation(annDescriptor, true);
+            }
+            
+            fieldVisitor.visitEnd();
+        }
 
         for (ParticMethod method : particClass.getMethods().values()) {
             new MethodCompiler(method, context).compile();

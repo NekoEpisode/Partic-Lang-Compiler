@@ -89,7 +89,17 @@ public class ClassSymbol extends Symbol {
         }
         // 从父类查找
         if (superClass != null) {
-            return superClass.resolveMethod(name, argTypes);
+            MethodSymbol method = superClass.resolveMethod(name, argTypes);
+            if (method != null) {
+                return method;
+            }
+        }
+        // 从接口查找
+        for (ClassSymbol iface : interfaces) {
+            MethodSymbol method = iface.resolveMethod(name, argTypes);
+            if (method != null) {
+                return method;
+            }
         }
         return null;
     }
@@ -156,6 +166,48 @@ public class ClassSymbol extends Symbol {
             if (iface.isSubtypeOf(other)) return true;
         }
         return false;
+    }
+    
+    /**
+     * 通过类名解析类符号（用于子类型检查）
+     * 从全局作用域查找，包括外部类（外部类可能已经加载到缓存中）
+     */
+    public ClassSymbol resolveClassByName(String className) {
+        // 如果类名就是当前类的完整名，直接返回
+        if (className.equals(fullName)) {
+            return this;
+        }
+        
+        // 尝试从全局作用域查找
+        Scope scope = memberScope;
+        while (scope != null && scope.getType() != Scope.ScopeType.GLOBAL) {
+            scope = scope.getParent();
+        }
+        
+        if (scope != null) {
+            // 先尝试直接解析（本地类）
+            Symbol symbol = scope.resolve(className);
+            if (symbol instanceof ClassSymbol) {
+                return (ClassSymbol) symbol;
+            }
+            
+            // 如果找不到，可能是外部类
+            // 外部类可能已经通过 ExternalClassLoader 加载并添加到全局作用域
+            // 或者可以通过父类链查找（如果当前类继承自外部类）
+            // 例如：如果当前类是 String，className 是 Object，可以通过 superClass 查找
+            if (superClass != null) {
+                if (superClass.getFullName().equals(className)) {
+                    return superClass;
+                }
+                // 递归查找父类的父类
+                ClassSymbol found = superClass.resolveClassByName(className);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        
+        return null;
     }
 
     // ============ 其他 ============

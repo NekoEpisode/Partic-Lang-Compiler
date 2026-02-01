@@ -5,6 +5,7 @@ import lang.partic.compiler.exceptions.CompileError;
 import lang.partic.compiler.ir.ParticMethodBody;
 import lang.partic.compiler.ir.ParticMethodBody.LocalVar;
 import lang.partic.compiler.ir.ParticMethodBody.TempVar;
+import lang.partic.compiler.symbol.MethodSymbol;
 import lang.partic.compiler.utils.TypeUtils;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -70,6 +71,7 @@ public class ExpressionCompiler {
             case "cast" -> compileCast();
             case "field_access" -> compileFieldAccess();
             case "call_method" -> compileMethodCall();
+            case "new" -> compileNew();
             case "array_access" -> compileArrayAccess();
             case "ternary" -> compileTernary();
             default -> {
@@ -539,26 +541,126 @@ public class ExpressionCompiler {
             }
         }
 
-        // 编译参数（从左到右）
+        // 获取方法符号（用于获取声明的参数类型）
+        MethodSymbol methodSymbol = (MethodSymbol) metadata.get("method_symbol");
+        List<String> declaredParamTypes = null;
+        if (methodSymbol != null) {
+            declaredParamTypes = methodSymbol.getParameterTypes();
+        }
+
+        // 编译参数（从左到右），并进行自动装箱
+        List<String> operands = temp.getOperands();
+        for (int i = 0; i < operands.size(); i++) {
+            String arg = operands.get(i);
+            // 先获取参数类型（在编译前）
+            String actualArgType = getOperandType(arg);
+            // 如果无法从 TempVar 或 LocalVar 获取类型，尝试从 argTypes 获取
+            if (actualArgType == null && argTypes != null && i < argTypes.size()) {
+                actualArgType = argTypes.get(i);
+            }
+            
+            // 编译参数
+            compileOperand(arg);
+            
+            // 类型转换：如果实际参数类型与方法期望的参数类型不同，进行类型转换
+            if (declaredParamTypes != null && i < declaredParamTypes.size() && actualArgType != null) {
+                String expectedParamType = declaredParamTypes.get(i);
+                
+                // 如果类型相同，不需要转换
+                if (!actualArgType.equals(expectedParamType)) {
+                    // 自动装箱：如果方法期望的参数类型是包装类型或 Object，而实际参数类型是基本类型
+                    if (TypeUtils.isPrimitive(actualArgType) && !TypeUtils.isPrimitive(expectedParamType)) {
+                        String boxedType = TypeUtils.getBoxedType(actualArgType);
+                        if (boxedType != null) {
+                            // 检查是否需要装箱（期望类型是包装类型或 Object）
+                            if (expectedParamType.equals(boxedType) || expectedParamType.equals("java.lang.Object")) {
+                                // 调用静态方法 valueOf
+                                String boxedTypeInternal = TypeUtils.toInternalName(boxedType);
+                                String boxMethodDescriptor = TypeUtils.getBoxMethodDescriptor(actualArgType);
+                                if (boxMethodDescriptor != null) {
+                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC, boxedTypeInternal, "valueOf",
+                                        boxMethodDescriptor, false);
+                                    log.debug("  自动装箱参数 {}: {} -> {} (期望类型: {})", i, actualArgType, boxedType, expectedParamType);
+                                }
+                            }
+                        }
+                    }
+                    // 数值类型提升：如果都是基本类型，且可以提升（如 int -> double）
+                    else if (TypeUtils.isPrimitive(actualArgType) && TypeUtils.isPrimitive(expectedParamType)) {
+                        if (TypeUtils.isAssignableFrom(expectedParamType, actualArgType)) {
+                            int castOp = getCastOpcode(actualArgType, expectedParamType);
+                            if (castOp != 0) {
+                                mv.visitInsn(castOp);
+                                log.debug("  类型提升参数 {}: {} -> {}", i, actualArgType, expectedParamType);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 构建方法描述符
+        // 优先使用方法符号的描述符（使用声明参数类型），如果没有则使用实际参数类型
+        String desc;
+        if (methodSymbol != null) {
+            // 使用方法声明的参数类型构建描述符
+            desc = methodSymbol.getDescriptor();
+        } else {
+            // 回退：使用实际参数类型（可能不正确，但至少能编译）
+            StringBuilder descBuilder = new StringBuilder("(");
+            if (argTypes != null) {
+                for (String argType : argTypes) {
+                    descBuilder.append(TypeUtils.toDescriptor(argType));
+                }
+            }
+            descBuilder.append(")");
+            descBuilder.append(TypeUtils.toDescriptor(temp.getType()));
+            desc = descBuilder.toString();
+        }
+
+        String owner = TypeUtils.toInternalName(objectType);
+        int opcode = isStatic ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
+
+        mv.visitMethodInsn(opcode, owner, method, desc, false);
+    }
+
+    /**
+     * 编译 new 表达式
+     */
+    private void compileNew() {
+        Map<String, Object> metadata = temp.getMetadata();
+        String className = (String) metadata.get("class");
+        @SuppressWarnings("unchecked")
+        List<String> argTypes = (List<String>) metadata.get("arg_types");
+        
+        if (className == null) {
+            throw new CompileError("new 表达式缺少类名");
+        }
+        
+        // 生成 NEW 指令
+        String internalName = TypeUtils.toInternalName(className);
+        mv.visitTypeInsn(Opcodes.NEW, internalName);
+        
+        // DUP：复制栈顶引用（因为构造函数会消耗一个引用）
+        mv.visitInsn(Opcodes.DUP);
+        
+        // 编译构造函数参数（从左到右）
         List<String> operands = temp.getOperands();
         for (String arg : operands) {
             compileOperand(arg);
         }
-
-        // 构建方法描述符
+        
+        // 构建构造函数描述符
         StringBuilder desc = new StringBuilder("(");
         if (argTypes != null) {
             for (String argType : argTypes) {
                 desc.append(TypeUtils.toDescriptor(argType));
             }
         }
-        desc.append(")");
-        desc.append(TypeUtils.toDescriptor(temp.getType()));
-
-        String owner = TypeUtils.toInternalName(objectType);
-        int opcode = isStatic ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
-
-        mv.visitMethodInsn(opcode, owner, method, desc.toString(), false);
+        desc.append(")V"); // 构造函数返回 void
+        
+        // 调用构造函数（INVOKESPECIAL）
+        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, internalName, "<init>", desc.toString(), false);
     }
 
     /**

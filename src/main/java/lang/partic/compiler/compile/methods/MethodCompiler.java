@@ -45,6 +45,23 @@ public class MethodCompiler {
         }
         MethodVisitor mv = context.getCw().visitMethod(access, particMethod.getName(), MethodDescriptorUtils.getMethodDescriptor(particMethod), null, null);
         context.setMv(mv);
+        
+        // 添加方法注解
+        for (var annotation : particMethod.getAnnotations()) {
+            String descriptor = "L" + annotation.getAnnotation().replace('.', '/') + ";";
+            mv.visitAnnotation(descriptor, true);  // true 表示运行时可见
+        }
+        
+        // 添加参数注解
+        int paramIndex = 0;
+        for (var param : particMethod.getParameters()) {
+            for (var annotation : param.getAnnotations()) {
+                String descriptor = "L" + annotation.getAnnotation().replace('.', '/') + ";";
+                mv.visitParameterAnnotation(paramIndex, descriptor, true);
+            }
+            paramIndex++;
+        }
+        
         mv.visitCode();
 
         new MethodBodyCompiler(particMethod.getBody(), context).compile();

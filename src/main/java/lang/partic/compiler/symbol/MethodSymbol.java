@@ -1,5 +1,6 @@
 package lang.partic.compiler.symbol;
 
+import lang.partic.compiler.utils.TypeUtils;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
@@ -110,13 +111,32 @@ public class MethodSymbol extends Symbol {
     }
 
     /**
-     * 简单的类型兼容性检查
-     * TODO: 支持子类型、自动装箱等
+     * 类型兼容性检查
+     * 检查实际参数类型（from）是否可以赋值给方法参数类型（to）
+     * 支持子类型转换、自动装箱等
      */
     private boolean isTypeCompatible(String from, String to) {
         if (from == null || to == null) return false;
         if (from.equals(to)) return true;
-        // TODO: 添加更多类型兼容性规则
+        
+        // 首先使用 TypeUtils.isAssignableFrom 检查（支持数值类型提升、自动装箱等）
+        boolean assignable = TypeUtils.isAssignableFrom(to, from);
+        if (assignable) {
+            return true;
+        }
+        
+        // 如果 TypeUtils 检查失败，尝试子类型检查
+        // 通过 owner 的 resolveClassByName 方法解析类
+        if (owner != null) {
+            ClassSymbol fromClass = owner.resolveClassByName(from);
+            ClassSymbol toClass = owner.resolveClassByName(to);
+            
+            if (fromClass != null && toClass != null) {
+                // 检查 fromClass 是否是 toClass 的子类型
+                return fromClass.isSubtypeOf(toClass);
+            }
+        }
+        
         return false;
     }
 

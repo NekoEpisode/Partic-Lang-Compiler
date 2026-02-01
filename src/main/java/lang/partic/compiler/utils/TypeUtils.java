@@ -186,7 +186,76 @@ public class TypeUtils {
     // ============ 类型兼容性 ============
 
     /**
+     * 获取基本类型对应的包装类型
+     */
+    public static String getBoxedType(String primitiveType) {
+        if (primitiveType == null) return null;
+        return switch (primitiveType) {
+            case "bool" -> "java.lang.Boolean";
+            case "byte" -> "java.lang.Byte";
+            case "short" -> "java.lang.Short";
+            case "int" -> "java.lang.Integer";
+            case "long" -> "java.lang.Long";
+            case "float" -> "java.lang.Float";
+            case "double" -> "java.lang.Double";
+            case "char" -> "java.lang.Character";
+            default -> null;
+        };
+    }
+
+    /**
+     * 获取包装类型对应的基本类型
+     */
+    public static String getUnboxedType(String boxedType) {
+        if (boxedType == null) return null;
+        return switch (boxedType) {
+            case "java.lang.Boolean" -> "bool";
+            case "java.lang.Byte" -> "byte";
+            case "java.lang.Short" -> "short";
+            case "java.lang.Integer" -> "int";
+            case "java.lang.Long" -> "long";
+            case "java.lang.Float" -> "float";
+            case "java.lang.Double" -> "double";
+            case "java.lang.Character" -> "char";
+            default -> null;
+        };
+    }
+
+    /**
+     * 获取拆箱方法名（用于生成字节码）
+     * 例如：Boolean -> booleanValue(), Integer -> intValue()
+     */
+    public static String getUnboxMethodName(String boxedType) {
+        if (boxedType == null) return null;
+        return switch (boxedType) {
+            case "java.lang.Boolean" -> "booleanValue";
+            case "java.lang.Byte" -> "byteValue";
+            case "java.lang.Short" -> "shortValue";
+            case "java.lang.Integer" -> "intValue";
+            case "java.lang.Long" -> "longValue";
+            case "java.lang.Float" -> "floatValue";
+            case "java.lang.Double" -> "doubleValue";
+            case "java.lang.Character" -> "charValue";
+            default -> null;
+        };
+    }
+
+    /**
+     * 获取装箱方法描述符（用于生成字节码）
+     * 例如：bool -> (Z)Ljava/lang/Boolean;, int -> (I)Ljava/lang/Integer;
+     */
+    public static String getBoxMethodDescriptor(String primitiveType) {
+        if (primitiveType == null) return null;
+        String boxedType = getBoxedType(primitiveType);
+        if (boxedType == null) return null;
+        String primitiveDescriptor = toDescriptor(primitiveType);
+        String boxedTypeInternal = toInternalName(boxedType);
+        return "(" + primitiveDescriptor + ")L" + boxedTypeInternal + ";";
+    }
+
+    /**
      * 检查赋值兼容性：from 类型的值能否赋给 to 类型的变量
+     * 支持数值类型提升、自动装箱等
      */
     public static boolean isAssignableFrom(String to, String from) {
         if (to == null || from == null) return false;
@@ -202,6 +271,25 @@ public class TypeUtils {
         // 数值类型的隐式转换（窄化需要显式转换，这里只允许宽化）
         if (isNumeric(to) && isNumeric(from)) {
             return getNumericRank(to) >= getNumericRank(from);
+        }
+
+        // 自动装箱：基本类型可以赋值给对应的包装类型或 Object
+        if (isPrimitive(from) && !isPrimitive(to)) {
+            String boxedType = getBoxedType(from);
+            if (boxedType != null) {
+                // 如果 to 是包装类型或 Object，则兼容
+                if (to.equals(boxedType) || to.equals("java.lang.Object")) {
+                    return true;
+                }
+            }
+        }
+
+        // 自动拆箱：包装类型可以赋值给对应的基本类型
+        if (!isPrimitive(from) && isPrimitive(to)) {
+            String unboxedType = getUnboxedType(from);
+            if (unboxedType != null && unboxedType.equals(to)) {
+                return true;
+            }
         }
 
         // TODO: 支持子类型检查（需要类继承信息）

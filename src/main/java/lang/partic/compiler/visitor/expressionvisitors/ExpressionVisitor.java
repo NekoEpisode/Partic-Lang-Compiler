@@ -461,7 +461,27 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
             if (method == null) {
                 // 构建参数类型字符串用于错误信息
                 String argTypesStr = argTypes.isEmpty() ? "无参数" : String.join(", ", argTypes);
-                throw new CompileError("在类型 '" + objectType + "' 中找不到方法 '" + methodName + "(" + argTypesStr + ")'");
+                
+                // 尝试获取类信息，列出可用的同名方法
+                ClassSymbol targetClass = context.resolveClass(objectType);
+                StringBuilder errorMsg = new StringBuilder();
+                errorMsg.append("在类型 '").append(objectType).append("' 中找不到方法 '")
+                        .append(methodName).append("(").append(argTypesStr).append(")'");
+                
+                if (targetClass != null) {
+                    List<MethodSymbol> availableMethods = targetClass.getMethods(methodName);
+                    if (!availableMethods.isEmpty()) {
+                        errorMsg.append("\n可用的 '").append(methodName).append("' 方法重载：");
+                        for (MethodSymbol m : availableMethods) {
+                            errorMsg.append("\n  - ").append(methodName).append("(");
+                            List<String> params = m.getParameterTypes();
+                            errorMsg.append(String.join(", ", params));
+                            errorMsg.append(") -> ").append(m.getType());
+                        }
+                    }
+                }
+                
+                throw new CompileError(errorMsg.toString());
             }
             returnType = method.getType();
             isStatic = method.isStatic();
@@ -481,8 +501,19 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
         temp.putMetadata("object", object);
         temp.putMetadata("object_type", objectType);
         temp.putMetadata("method", methodName);
-        temp.putMetadata("arg_types", argTypes);
+        temp.putMetadata("arg_types", argTypes);  // 实际参数类型（用于类型检查）
         temp.putMetadata("is_static", isStatic);
+        
+        // 保存匹配到的方法符号，用于生成正确的方法描述符
+        MethodSymbol matchedMethod = null;
+        if (objectType == null && !methodName.isEmpty()) {
+            matchedMethod = context.resolveMethod(null, methodName, argTypes);
+        } else if (objectType != null && !methodName.isEmpty()) {
+            matchedMethod = context.resolveMethod(objectType, methodName, argTypes);
+        }
+        if (matchedMethod != null) {
+            temp.putMetadata("method_symbol", matchedMethod);
+        }
         
         for (String arg : args) {
             temp.addOperand(arg);
@@ -551,7 +582,58 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
             TempVar temp = new TempVar("load_super", superType);
             return body.addTemp(temp);
         }
-        // TODO: 处理 new, lambda 等
+        if (ctx.creator() != null) {
+            // new 表达式
+            return visit(ctx.creator());
+        }
+        // TODO: 处理 lambda 等
+        return visitChildren(ctx);
+    }
+
+    @Override
+    public String visitCreator(ParticParser.CreatorContext ctx) {
+        // 处理 new ClassName(args) 形式
+        if (ctx.classType() != null) {
+            String className = ctx.classType().getText();
+            String resolvedClassName = context.resolveType(className);
+            
+            // 解析类
+            ClassSymbol classSymbol = context.resolveClass(resolvedClassName);
+            if (classSymbol == null) {
+                throw new CompileError("找不到类 '" + className + "'");
+            }
+            
+            // 收集构造函数参数
+            List<String> args = new ArrayList<>();
+            List<String> argTypes = new ArrayList<>();
+            
+            if (ctx.argumentList() != null) {
+                for (ParticParser.ExpressionContext argCtx : ctx.argumentList().expression()) {
+                    String arg = visit(argCtx);
+                    args.add(arg);
+                    argTypes.add(getType(arg));
+                }
+            }
+            
+            // 查找匹配的构造函数
+            MethodSymbol constructor = classSymbol.resolveConstructor(argTypes);
+            if (constructor == null) {
+                String argTypesStr = argTypes.isEmpty() ? "无参数" : String.join(", ", argTypes);
+                throw new CompileError("在类 '" + className + "' 中找不到匹配的构造函数: (" + argTypesStr + ")");
+            }
+            
+            // 创建 new 表达式的 TempVar
+            TempVar temp = new TempVar("new", resolvedClassName);
+            temp.putMetadata("class", resolvedClassName);
+            temp.putMetadata("arg_types", argTypes);
+            for (String arg : args) {
+                temp.addOperand(arg);
+            }
+            
+            return body.addTemp(temp);
+        }
+        
+        // TODO: 处理数组创建
         return visitChildren(ctx);
     }
 
@@ -561,23 +643,31 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
     private String handleVariableLoad(String varName) {
         String varType = null;
         String loadOp = "load";
+        Symbol symbol = null;
         
-        // 从符号表查找变量
-        Symbol symbol = context.resolveVariable(varName);
-        
-        if (symbol instanceof VariableSymbol vs) {
-            varType = vs.getType();
+        // 首先检查 body.locals（局部变量，在 Pass 2 中声明的）
+        ParticMethodBody.LocalVar local = body.getLocals().get(varName);
+        if (local != null) {
+            varType = local.getType();
             loadOp = "load_local";
-        } else if (symbol instanceof FieldSymbol fs) {
-            varType = fs.getType();
-            loadOp = fs.isStatic() ? "load_static_field" : "load_field";
         } else {
-            // 可能是未解析的外部类或静态成员
-            // 尝试从类名解析（使用 context.resolveClass 会通过 ImportManager 解析）
-            ClassSymbol cls = context.resolveClass(varName);
-            if (cls != null) {
-                varType = cls.getFullName();
-                loadOp = "load_class";
+            // 从符号表查找变量（参数、字段等，在 Pass 1 中声明的）
+            symbol = context.resolveVariable(varName);
+            
+            if (symbol instanceof VariableSymbol vs) {
+                varType = vs.getType();
+                loadOp = "load_local";
+            } else if (symbol instanceof FieldSymbol fs) {
+                varType = fs.getType();
+                loadOp = fs.isStatic() ? "load_static_field" : "load_field";
+            } else {
+                // 可能是未解析的外部类或静态成员
+                // 尝试从类名解析（使用 context.resolveClass 会通过 ImportManager 解析）
+                ClassSymbol cls = context.resolveClass(varName);
+                if (cls != null) {
+                    varType = cls.getFullName();
+                    loadOp = "load_class";
+                }
             }
         }
         
