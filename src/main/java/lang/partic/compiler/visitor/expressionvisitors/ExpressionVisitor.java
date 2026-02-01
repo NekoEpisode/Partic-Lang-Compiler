@@ -406,6 +406,16 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
         // 如果 objectType 为 null，尝试从 object 获取类型
         if (objectType == null && object != null) {
             objectType = getType(object);
+            
+            // 如果 objectType 仍为 null，检查 object 是否是未声明的标识符
+            if (objectType == null) {
+                TempVar objectTemp = body.getTemps().get(object);
+                if (objectTemp != null && "load".equals(objectTemp.getOp())) {
+                    // object 是一个标识符的 temp，且类型为 null，说明未声明
+                    String identifierName = objectTemp.getOperands().isEmpty() ? object : objectTemp.getOperands().get(0);
+                    throw new CompileError("找不到标识符 '" + identifierName + "'");
+                }
+            }
         }
         
         // 收集参数并获取类型
