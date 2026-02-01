@@ -508,8 +508,11 @@ public class ExpressionCompiler {
         }
 
         if (objectType == null) {
-            log.error("方法调用无法确定对象类型: method={}, metadata={}", method, metadata);
-            return;
+            throw new CompileError("方法调用无法确定对象类型: method=" + method);
+        }
+        
+        if (method == null || method.isEmpty()) {
+            throw new CompileError("方法调用缺少方法名");
         }
         
         // 判断是否为局部方法调用（objectType 从当前类获取，且原始 metadata 中 object_type 为 null）

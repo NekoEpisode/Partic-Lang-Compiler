@@ -427,35 +427,44 @@ public class ExpressionVisitor extends ParticBaseVisitor<String> {
         // 如果 objectType 为 null 且 methodName 不为空，尝试从当前类解析（局部方法调用）
         if (objectType == null && !methodName.isEmpty()) {
             MethodSymbol method = context.resolveMethod(null, methodName, argTypes);
-            if (method != null) {
-                returnType = method.getType();
-                isStatic = method.isStatic();
-                
-                // 在静态方法中不能调用实例方法
-                MethodSymbol currentMethod = context.getCurrentMethod();
-                if (currentMethod != null && currentMethod.isStatic() && !isStatic) {
-                    throw new CompileError("静态方法 '" + currentMethod.getName() + "' 中不能调用实例方法 '" + methodName + "'");
-                }
-                
-                // 如果返回类型是 void，对于 var 推断来说是有问题的
-                if (returnType != null && returnType.equals("void")) {
-                    returnType = null; // void 不能用于类型推断
-                }
+            if (method == null) {
+                // 构建参数类型字符串用于错误信息
+                String argTypesStr = argTypes.isEmpty() ? "无参数" : String.join(", ", argTypes);
+                throw new CompileError("找不到方法 '" + methodName + "(" + argTypesStr + ")'");
+            }
+            returnType = method.getType();
+            isStatic = method.isStatic();
+            
+            // 在静态方法中不能调用实例方法
+            MethodSymbol currentMethod = context.getCurrentMethod();
+            if (currentMethod != null && currentMethod.isStatic() && !isStatic) {
+                throw new CompileError("静态方法 '" + currentMethod.getName() + "' 中不能调用实例方法 '" + methodName + "'");
+            }
+            
+            // 如果返回类型是 void，对于 var 推断来说是有问题的
+            if (returnType != null && returnType.equals("void")) {
+                returnType = null; // void 不能用于类型推断
             }
         } else if (objectType != null && !methodName.isEmpty()) {
             // 实例方法或静态方法调用
             MethodSymbol method = context.resolveMethod(objectType, methodName, argTypes);
-            if (method != null) {
-                returnType = method.getType();
-                isStatic = method.isStatic();
-                // 如果返回类型是 void，对于 var 推断来说是有问题的
-                if (returnType != null && returnType.equals("void")) {
-                    returnType = null; // void 不能用于类型推断
-                }
+            if (method == null) {
+                // 构建参数类型字符串用于错误信息
+                String argTypesStr = argTypes.isEmpty() ? "无参数" : String.join(", ", argTypes);
+                throw new CompileError("在类型 '" + objectType + "' 中找不到方法 '" + methodName + "(" + argTypesStr + ")'");
+            }
+            returnType = method.getType();
+            isStatic = method.isStatic();
+            // 如果返回类型是 void，对于 var 推断来说是有问题的
+            if (returnType != null && returnType.equals("void")) {
+                returnType = null; // void 不能用于类型推断
             }
         } else if (objectType != null && methodName.isEmpty()) {
             // 函数调用（如 lambda 表达式调用）
             // TODO: 处理函数调用
+        } else {
+            // objectType 为 null 且 methodName 为空，这是无效的方法调用
+            throw new CompileError("无效的方法调用：无法确定调用目标");
         }
         
         TempVar temp = new TempVar("call_method", returnType);
