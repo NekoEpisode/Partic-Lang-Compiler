@@ -198,6 +198,7 @@ primitiveType
     | 'bool'
     | 'str'
     | 'void'
+    | 'var' | 'val'  // 类型推断
     ;
 
 classType

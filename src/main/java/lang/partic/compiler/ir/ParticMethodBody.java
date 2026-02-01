@@ -101,6 +101,7 @@ public class ParticMethodBody {
      */
     public static class TempVar {
         private String op;
+        private String type;  // 表达式结果类型（完整类名，如 int, java.lang.String）
         private Object value; // 用于常量
         private List<String> operands; // 操作数（可以是其他temp或local的名字）
         private Map<String, Object> metadata; // 额外信息（如object, field, method等）
@@ -111,8 +112,21 @@ public class ParticMethodBody {
             this.metadata = new HashMap<>();
         }
 
+        public TempVar(String op, String type) {
+            this(op);
+            this.type = type;
+        }
+
         public String getOp() {
             return op;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
         }
 
         public Object getValue() {
@@ -121,6 +135,30 @@ public class ParticMethodBody {
 
         public void setValue(Object value) {
             this.value = value;
+        }
+
+        /**
+         * 设置常量值并自动推断类型
+         */
+        public void setValueWithType(Object value) {
+            this.value = value;
+            if (value == null) {
+                this.type = "null";
+            } else if (value instanceof Integer) {
+                this.type = "int";
+            } else if (value instanceof Long) {
+                this.type = "long";
+            } else if (value instanceof Float) {
+                this.type = "float";
+            } else if (value instanceof Double) {
+                this.type = "double";
+            } else if (value instanceof Boolean) {
+                this.type = "bool";
+            } else if (value instanceof Character) {
+                this.type = "char";
+            } else if (value instanceof String) {
+                this.type = "java.lang.String";
+            }
         }
 
         public List<String> getOperands() {
@@ -137,6 +175,12 @@ public class ParticMethodBody {
 
         public void putMetadata(String key, Object value) {
             this.metadata.put(key, value);
+        }
+
+        @Override
+        public String toString() {
+            return "TempVar{op='" + op + "', type='" + type + "', value=" + value + 
+                   ", operands=" + operands + "}";
         }
     }
 
@@ -254,6 +298,23 @@ public class ParticMethodBody {
 
         public boolean isEnter() {
             return isEnter;
+        }
+    }
+
+    /**
+     * 表达式语句（执行一个表达式，通常是方法调用）
+     * 例如: System.out.println("Hello");
+     */
+    public static class ExpressionStatement extends Statement {
+        private String tempName;  // 需要执行的表达式对应的 temp 变量名
+
+        public ExpressionStatement(String tempName) {
+            super("expression");
+            this.tempName = tempName;
+        }
+
+        public String getTempName() {
+            return tempName;
         }
     }
 

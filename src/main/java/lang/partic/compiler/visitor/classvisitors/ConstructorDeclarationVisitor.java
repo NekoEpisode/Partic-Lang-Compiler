@@ -3,7 +3,6 @@ package lang.partic.compiler.visitor.classvisitors;
 import lang.partic.compiler.antlr.ParticBaseVisitor;
 import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
-import lang.partic.compiler.exceptions.CompileError;
 import lang.partic.compiler.ir.*;
 import lang.partic.compiler.manager.ImportManager;
 import lang.partic.compiler.visitor.statementvisitors.StatementVisitor;
@@ -17,19 +16,14 @@ public class ConstructorDeclarationVisitor extends ParticBaseVisitor<ParticConst
 
     /**
      * 解析类型名称为完整类名
-     * @param typeName 类型名称（可能是简单名、别名或完整名）
-     * @return 完整类名
-     * @throws CompileError 如果无法解析类型
+     * 如果无法解析，返回原始名称让后端处理
      */
     private String resolveType(String typeName) {
         ImportManager importManager = context.getImportManager();
         String fullName = importManager.findFullName(typeName);
         
-        if (fullName == null) {
-            throw new CompileError("Cannot resolve type: " + typeName);
-        }
-        
-        return fullName;
+        // 找不到就返回原值，让后端处理
+        return fullName != null ? fullName : typeName;
     }
 
     @Override

@@ -3,15 +3,19 @@ package lang.partic.compiler.visitor;
 import lang.partic.compiler.antlr.ParticBaseVisitor;
 import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
-import lang.partic.compiler.exceptions.CompileError;
 import lang.partic.compiler.ir.*;
-import lang.partic.compiler.manager.ImportManager;
+import lang.partic.compiler.symbol.ClassSymbol;
 import lang.partic.compiler.visitor.classvisitors.ConstructorDeclarationVisitor;
 import lang.partic.compiler.visitor.classvisitors.FieldDeclarationVisitor;
 import lang.partic.compiler.visitor.classvisitors.MethodDeclarationVisitor;
 
 import java.util.List;
 
+/**
+ * Pass 2: 类声明访问器
+ * 
+ * 处理类体，生成 IR（此时符号表已由 Pass 1 建立）
+ */
 public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
     private final VisitContext context;
     private final FieldDeclarationVisitor fieldVisitor;
@@ -25,34 +29,22 @@ public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
         this.constructorVisitor = new ConstructorDeclarationVisitor(context);
     }
 
-    /**
-     * 解析类型名称为完整类名
-     * @param typeName 类型名称（可能是简单名、别名或完整名）
-     * @return 完整类名
-     * @throws CompileError 如果无法解析类型
-     */
-    private String resolveType(String typeName) {
-        ImportManager importManager = context.getImportManager();
-        String fullName = importManager.findFullName(typeName);
-        
-        if (fullName == null) {
-            throw new CompileError("Cannot resolve type: " + typeName);
-        }
-        
-        return fullName;
-    }
-
     @Override
     public ParticClass visitClassDeclaration(ParticParser.ClassDeclarationContext ctx) {
-        // 创建类对象
-        ParticClass particClass = new ParticClass(ctx.IDENTIFIER().getText());
+        String className = ctx.IDENTIFIER().getText();
+        
+        // 从符号表获取 ClassSymbol 并设置为当前类
+        ClassSymbol classSymbol = context.getSymbolTable().resolveClass(className);
+        context.setCurrentClass(classSymbol);
+        
+        // 创建 IR 类对象
+        ParticClass particClass = new ParticClass(className);
 
         // 修饰符
         ParticModifiers modifiers = new ParticModifiers();
         if (ctx.modifiers() != null) {
             for (ParticParser.ModifierContext modCtx : ctx.modifiers().modifier()) {
                 String mod = modCtx.getText();
-                // 访问修饰符：pub, priv, prot, pack
                 switch (mod) {
                     case "pub", "priv", "prot", "pack" -> modifiers.setAccess(mod);
                     default -> modifiers.addOther(mod);
@@ -64,8 +56,7 @@ public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
         // 实现的接口
         if (ctx.typeList() != null) {
             for (ParticParser.TypeContext typeCtx : ctx.typeList().type()) {
-                String interfaceType = typeCtx.getText();
-                String resolvedType = resolveType(interfaceType);
+                String resolvedType = context.resolveType(typeCtx.getText());
                 particClass.addImplements(resolvedType);
             }
         }
@@ -73,10 +64,9 @@ public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
         // 注解
         for (ParticParser.AnnotationContext annCtx : ctx.annotation()) {
             String annotationType = annCtx.qualifiedName().getText();
-            String resolvedAnnotation = resolveType(annotationType);
+            String resolvedAnnotation = context.resolveType(annotationType);
             ParticAnnotation annotation = new ParticAnnotation(resolvedAnnotation);
             
-            // 处理注解参数
             if (annCtx.elementValuePairs() != null) {
                 // TODO: 解析注解参数
             }
@@ -86,8 +76,7 @@ public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
 
         // 父类
         if (ctx.type() != null) {
-            String parentType = ctx.type().getText();
-            String extendsClass = resolveType(parentType);
+            String extendsClass = context.resolveType(ctx.type().getText());
             particClass.setExtendsClass(extendsClass);
         }
 
@@ -106,10 +95,12 @@ public class ClassDeclarationVisitor extends ParticBaseVisitor<ParticClass> {
                     ParticConstructor constructor = constructorVisitor.visitConstructorDeclaration(bodyCtx.constructorDeclaration());
                     particClass.addConstructor(constructor);
                 }
-                // staticBlock 会被自动忽略（返回 null）
             }
         }
 
+        // 清除当前类
+        context.setCurrentClass(null);
+        
         return particClass;
     }
 }

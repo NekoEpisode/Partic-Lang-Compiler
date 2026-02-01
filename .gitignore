@@ -46,3 +46,4 @@ build/
 /Antlr/ParticLexer.tokens
 /Antlr/ParticParser.java
 /Antlr/ParticVisitor.java
+/debug

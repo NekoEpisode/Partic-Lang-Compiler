@@ -5,11 +5,11 @@ import lang.partic.compiler.antlr.ParticParser;
 import lang.partic.compiler.context.VisitContext;
 import lang.partic.compiler.exceptions.CompileError;
 import lang.partic.compiler.ir.ParticMethodBody;
-import lang.partic.compiler.ir.ParticMethodBody.AssignStatement;
-import lang.partic.compiler.ir.ParticMethodBody.ReturnStatement;
-import lang.partic.compiler.ir.ParticMethodBody.ScopeStatement;
-import lang.partic.compiler.manager.ImportManager;
+import lang.partic.compiler.ir.ParticMethodBody.*;
+import lang.partic.compiler.utils.TypeUtils;
 import lang.partic.compiler.visitor.expressionvisitors.ExpressionVisitor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,12 +21,14 @@ import java.util.Map;
  * 处理方法体中的所有语句类型
  */
 public class StatementVisitor extends ParticBaseVisitor<Void> {
+    private static final Logger log = LoggerFactory.getLogger(StatementVisitor.class);
+    
     private final ParticMethodBody body;
     private final VisitContext context;
     private final ExpressionVisitor exprVisitor;
     private int scopeLevel; // 当前作用域层级，0表示方法级作用域
     private int scopeIdCounter; // 作用域ID计数器
-    private Map<String, Integer> varScopes; // 变量名 -> 作用域层级
+    private final Map<String, Integer> varScopes; // 变量名 -> 作用域层级
 
     public StatementVisitor(ParticMethodBody body, VisitContext context) {
         this.body = body;
@@ -41,14 +43,28 @@ public class StatementVisitor extends ParticBaseVisitor<Void> {
      * 解析类型名称为完整类名
      */
     private String resolveType(String typeName) {
-        ImportManager importManager = context.getImportManager();
-        String fullName = importManager.findFullName(typeName);
+        return context.resolveType(typeName);
+    }
+
+    /**
+     * 获取临时变量或局部变量的类型
+     */
+    private String getType(String name) {
+        if (name == null) return null;
         
-        if (fullName == null) {
-            throw new CompileError("Cannot resolve type: " + typeName);
+        // 先查临时变量
+        TempVar temp = body.getTemps().get(name);
+        if (temp != null) {
+            return temp.getType();
         }
         
-        return fullName;
+        // 再查局部变量
+        ParticMethodBody.LocalVar local = body.getLocals().get(name);
+        if (local != null) {
+            return local.getType();
+        }
+        
+        return null;
     }
 
     @Override
@@ -80,9 +96,10 @@ public class StatementVisitor extends ParticBaseVisitor<Void> {
     public Void visitVariableDeclarationStatement(ParticParser.VariableDeclarationStatementContext ctx) {
         // variableDeclarationStatement: modifiers type variableDeclarator (',' variableDeclarator)* ';'
         
-        // 解析类型
-        String type = ctx.type().getText();
-        String resolvedType = resolveType(type);
+        // 解析声明类型
+        String declaredType = ctx.type().getText();
+        boolean isTypeInference = declaredType.equals("var") || declaredType.equals("val");
+        String resolvedType = isTypeInference ? null : resolveType(declaredType);
         
         // 解析修饰符
         List<String> modifiers = new ArrayList<>();
@@ -92,25 +109,57 @@ public class StatementVisitor extends ParticBaseVisitor<Void> {
             }
         }
         
+        // val 自动添加 final 修饰符
+        if (declaredType.equals("val") && !modifiers.contains("final")) {
+            modifiers.add("final");
+        }
+        
         // 处理每个变量声明
         for (ParticParser.VariableDeclaratorContext varCtx : ctx.variableDeclarator()) {
             String varName = varCtx.IDENTIFIER().getText();
             
             // 检查是否需要重命名（同名变量在不同作用域）
             if (varScopes.containsKey(varName) && varScopes.get(varName) < scopeLevel) {
-                // 需要重命名
                 varName = varName + "$" + scopeLevel;
             }
             
             // 记录变量的作用域
             varScopes.put(varName, scopeLevel);
             
-            // 添加到locals
-            body.addLocal(varName, resolvedType, scopeLevel, modifiers);
+            // 处理初始化表达式
+            String tempName = null;
+            String exprType = null;
             
-            // 如果有初始化表达式，生成赋值语句
             if (varCtx.expression() != null) {
-                String tempName = exprVisitor.visit(varCtx.expression());
+                tempName = exprVisitor.visit(varCtx.expression());
+                exprType = getType(tempName);
+            }
+            
+            // 确定变量的最终类型
+            String finalType;
+            if (isTypeInference) {
+                // var/val: 类型推断
+                if (exprType == null) {
+                    throw new CompileError("使用 " + declaredType + " 声明变量时必须提供初始化表达式");
+                }
+                finalType = exprType;
+                log.debug("类型推断: {} {} = ... → 推断类型: {}", declaredType, varName, finalType);
+            } else {
+                // 显式类型声明
+                finalType = resolvedType;
+                
+                // 类型检查
+                if (exprType != null && !TypeUtils.isAssignableFrom(finalType, exprType)) {
+                    throw new CompileError("类型不匹配: 不能将 '" + exprType + "' 赋值给 '" + finalType + "'");
+                }
+                log.debug("类型检查: {} {} = ... → 声明类型: {}, 表达式类型: {}", declaredType, varName, finalType, exprType);
+            }
+            
+            // 添加到 locals
+            body.addLocal(varName, finalType, scopeLevel, modifiers);
+            
+            // 生成赋值语句
+            if (tempName != null) {
                 body.addStatement(new AssignStatement(varName, tempName));
             }
         }
@@ -122,7 +171,10 @@ public class StatementVisitor extends ParticBaseVisitor<Void> {
     public Void visitExpressionStatement(ParticParser.ExpressionStatementContext ctx) {
         // expressionStatement: expression ';'
         // 表达式语句（如方法调用、赋值等）
-        exprVisitor.visit(ctx.expression());
+        String tempName = exprVisitor.visit(ctx.expression());
+        
+        // 记录需要执行的表达式
+        body.addStatement(new ExpressionStatement(tempName));
         return null;
     }
 
@@ -131,8 +183,35 @@ public class StatementVisitor extends ParticBaseVisitor<Void> {
         // returnStatement: 'return' expression? ';'
         if (ctx.expression() != null) {
             String tempName = exprVisitor.visit(ctx.expression());
+            String exprType = getType(tempName);
+            
+            // 检查返回类型
+            var currentMethod = context.getCurrentMethod();
+            if (currentMethod != null) {
+                String returnType = currentMethod.getType();
+                
+                // void 方法不能返回值
+                if (returnType != null && returnType.equals("void")) {
+                    throw new CompileError("void 方法不能返回值");
+                }
+                
+                // 检查返回类型是否兼容
+                if (exprType != null && returnType != null && !TypeUtils.isAssignableFrom(returnType, exprType)) {
+                    throw new CompileError("返回类型不匹配: 方法返回类型是 '" + returnType + "'，但返回表达式的类型是 '" + exprType + "'");
+                }
+            }
+            
             body.addStatement(new ReturnStatement(tempName));
         } else {
+            // 无返回值的 return
+            var currentMethod = context.getCurrentMethod();
+            if (currentMethod != null) {
+                String returnType = currentMethod.getType();
+                // void 方法可以没有返回值，非 void 方法必须有返回值
+                if (returnType != null && !returnType.equals("void")) {
+                    throw new CompileError("方法返回类型是 '" + returnType + "'，但 return 语句没有返回值");
+                }
+            }
             body.addStatement(new ReturnStatement(null));
         }
         return null;
